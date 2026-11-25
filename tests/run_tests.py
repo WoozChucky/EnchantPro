@@ -196,9 +196,20 @@ check("reply names enchant, fee and mats", tells and "+7 Sta Bracer: 20s with yo
 check("cast button holds the buyer's enchant", G.EnchantProCastButton.attrs["macrotext"] == "/cast Enchant Bracer - Greater Stamina", G.EnchantProCastButton.attrs["macrotext"])
 check("cast button flags missing mats", "(no mats)" in G.EnchantProCastButton.text, G.EnchantProCastButton.text)
 
-# --- the buyer comes near: trade opens
+# --- the buyer comes near: a click opens the trade (never by itself)
 T.units["target"] = "Nx Thearabian"; T.near["target"] = True
 T.tick()
+check("no trade opens by itself", called("InitiateTrade") == [], called("InitiateTrade"))
+rg = lua.eval("rawget")
+def row_of(ns_, key, rawget_):
+    for i in range(1, 21):
+        r = ns_.rows[i]
+        b = rawget_(r, "buyer")
+        if b is not None and b.key == key: return r
+    return None
+T.ns.refresh()
+nrow = row_of(T.ns, "nx thearabian", rg)
+nrow.scripts.OnClick(nrow, "LeftButton")
 check("trade opened with the buyer in range", called("InitiateTrade") == [["InitiateTrade", "target"]], called("InitiateTrade"))
 
 # --- trade 1: the mats
@@ -481,7 +492,7 @@ advance(7); T.runTimers()
 check("toast hides after 6 s", not toast.shown)
 slash("compact")
 bar = G.EnchantProCompact
-check("compact folds", bar is not None and bar.shown and not panel.shown and "2 buyers · 0 in range" in (bar.text.text or ""),
+check("compact folds", bar is not None and bar.shown and not panel.shown and "2 in queue · 0 in range" in (bar.text.text or ""),
       bar and (bar.shown, panel.shown, bar.text.text))
 slash("compact")
 check("compact unfolds", not bar.shown and panel.shown)
@@ -498,7 +509,7 @@ new_globals = [k for k in lua.eval("function() local t = {} for k in pairs(_G) d
 check("no stray globals", not new_globals, new_globals)
 sizes = {f: len((addon / f).read_text(encoding="utf-8").splitlines()) for f in FILES}
 check("files stay small", all(n < 700 for n in sizes.values()), sizes)
-bad_art = [f for f in FILES if re.search(r'"Interface\\[A-Za-z]', (addon / f).read_text(encoding="utf-8"))]
+bad_art = [f for f in FILES if re.search(r'Interface\\(?!\\)', (addon / f).read_text(encoding="utf-8"))]
 check("art paths keep their backslashes", not bad_art, bad_art)
 check("minimap button default angle", G.EnchantProDB.ui.minimapAngle == 200, G.EnchantProDB.ui.minimapAngle)
 check("compact bar default place", G.EnchantProCompact.point is not None and G.EnchantProCompact.point[5] == -80, G.EnchantProCompact.point and G.EnchantProCompact.point[5])
@@ -534,6 +545,25 @@ check("kit classHex", Kit.classHex("MAGE") == "3fc7eb" and Kit.classHex("ROGUE")
 st = Kit.steps(w, ltab("Asked", "Mats", "Item"))
 st.Set(st, 1, 2)
 check("kit steps", st.done == 1 and st.current == 2)
+scrolled = []
+sp = Kit.row(w, 20)   # any frame will do as the scroll area
+sc = Kit.scroller(sp, lambda *a: scrolled.append(1))
+sc.Set(sc, 25, 6)
+for _ in range(3): sp.scripts.OnMouseWheel(sp, -1)
+check("kit scroller: wheel down moves the rows", sc.offset == 3 and len(scrolled) == 3, (sc.offset, len(scrolled)))
+sc.Set(sc, 25, 6)
+check("kit scroller: says what's above and below", "3 more" in (sc.text.text or "") and "16 more" in (sc.text.text or ""), sc.text.text)
+sp.scripts.OnMouseWheel(sp, 1)
+check("kit scroller: wheel up", sc.offset == 2, sc.offset)
+sc.Set(sc, 5, 6)
+check("kit scroller: clamps when the list shrinks", sc.offset == 0 and (sc.text.text or "") == "", (sc.offset, sc.text.text))
+for _ in range(2): sp.scripts.OnMouseWheel(sp, -1)
+check("kit scroller: no scrolling past the end", sc.offset == 0, sc.offset)
+mk = Kit.row(w, 20)
+mk.SetMark(mk, True)
+on = mk.marked
+mk.SetMark(mk, False)
+check("kit row mark", on == True and mk.marked == False, (on, mk.marked))
 T.noCloseButton = True
 w3 = Kit.window("KitTestWin3", "Test", r"Interface\Icons\Trade_Engraving", 300, 200, lua.table())
 T.noCloseButton = None
@@ -642,7 +672,10 @@ check("invite: row says in group, and where", gia_row and "in group" in (gia_row
       gia_row and (gia_row[0].right.text, gia_row[0].sub.text))
 T7.near["party1"] = True
 T7.tick()
-check("invite: trade opens with the group member in range", called7("InitiateTrade") == [["InitiateTrade", "party1"]], called7("InitiateTrade"))
+T7.ns.refresh()
+grow = row_of(T7.ns, "gia rook", rg7)
+grow.scripts.OnClick(grow, "LeftButton")
+check("invite: a click trades with the group member in range", called7("InitiateTrade") == [["InitiateTrade", "party1"]], called7("InitiateTrade"))
 
 # the enchant done: let go 15 s later, not before
 T7.npc = "Gia Rook"
@@ -706,8 +739,212 @@ nrow[0].scripts.OnClick(nrow[0], "LeftButton")
 check("click on a buyer far away invites them", called7("InviteUnit")[-1] == ["InviteUnit", "No Inv"], called7("InviteUnit")[-1:])
 G7.SlashCmdList.ENCHANTPRO("kick")
 check("/ep kick turns letting go off", G7.EnchantProDB.autoKick == False)
-tg_keys = [T7.ns.toggles[i].key for i in range(1, 7)]
+tg_keys = [T7.ns.toggles[i].key for i in range(1, len(T7.ns.toggles) + 1)]
 check("invite and kick toggles on the Buyers tab", "invite" in tg_keys and "autoKick" in tg_keys, tg_keys)
+
+# --- the queue: numbers, order, lifetime, saved through a reload or a restart
+lua_type = LUPA.lua_type
+def lua_src(v):
+    """A saved Lua value written back as Lua source, for a fresh runtime."""
+    t = lua_type(v)
+    if t == "table":
+        parts = []
+        for k, x in v.items():
+            key = ("[%d]" % k) if isinstance(k, int) else ("[%r]" % k).replace("'", '"')
+            parts.append(key + " = " + lua_src(x))
+        return "{ " + ", ".join(parts) + " }"
+    if isinstance(v, bool): return "true" if v else "false"
+    if isinstance(v, (int, float)): return repr(v)
+    if isinstance(v, str): return '"' + v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n") + '"'
+    return "nil"
+def fresh(pre=""):
+    l = runtime(pre)
+    g = l.globals()
+    eq = l.table(); eq["item:bracer"] = "INVTYPE_WRIST"; eq["item:boots"] = "INVTYPE_FEET"; eq["item:sword"] = "INVTYPE_WEAPON"
+    g.T.equip = eq
+    return l, g, g.T
+lua8, G8, T8 = fresh()
+T8.fire("ADDON_LOADED", "EnchantPro"); T8.fire("PLAYER_LOGIN"); T8.fire("TRADE_SKILL_SHOW"); T8.runTimers()
+Q = T8.ns
+qb = Q.buyers
+T8.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Ann A")
+T8.time = T8.time + 5
+T8.fire("CHAT_MSG_WHISPER", "crusader pls", "Ben B")
+T8.time = T8.time + 5
+T8.fire("CHAT_MSG_WHISPER", "+5 agi boots pls", "Cy C")
+check("queue: numbered in the order they asked", (qb["ann a"].n, qb["ben b"].n, qb["cy c"].n) == (1, 2, 3), (qb["ann a"].n, qb["ben b"].n, qb["cy c"].n))
+T8.time = T8.time + 30
+T8.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Ann A")
+check("queue: asking again keeps the number", qb["ann a"].n == 1 and Q.place(qb["ann a"]) == 1, qb["ann a"].n)
+check("queue: place", Q.place(qb["cy c"]) == 3, Q.place(qb["cy c"]))
+T8.fire("CHAT_MSG_CHANNEL", "LF " + FIERY + " pls", "Al Fire", "", "2. Trade", "", "", 2, 2, "Trade")
+ql = Q.queueList()
+check("queue: someone you can't serve gets no number, listed last", qb["al fire"].n is None and [ql[i].key for i in range(1, 5)] == ["ann a", "ben b", "cy c", "al fire"],
+      [ql[i].key for i in range(1, len(ql) + 1)])
+T8.time = T8.time + 11 * 60
+T8.tick()
+check("queue: still there after 11 minutes", qb["ann a"] is not None and qb["cy c"] is not None)
+wait_before = T8.time - qb["ann a"].since
+
+# a client restart: GetTime starts over, the wall clock moved on 60 s
+T8.fire("PLAYER_LOGOUT")
+saved_wall = G8.time()
+src = "EnchantProDB = " + lua_src(G8.EnchantProDB)
+lua9, G9, T9 = fresh(src)
+T9.time = 100
+T9.wallOffset = saved_wall + 60 - 100
+T9.fire("ADDON_LOADED", "EnchantPro"); T9.fire("PLAYER_LOGIN")
+qb9 = T9.ns.buyers
+ok = qb9["ann a"] is not None and qb9["ben b"] is not None and qb9["cy c"] is not None
+check("restore: the queue is back after a restart", ok and (qb9["ann a"].n, qb9["ben b"].n, qb9["cy c"].n) == (1, 2, 3),
+      ok and (qb9["ann a"].n, qb9["ben b"].n, qb9["cy c"].n))
+check("restore: waiting time carries on", ok and abs((T9.time - qb9["ann a"].since) - (wait_before + 60)) <= 1,
+      ok and (T9.time - qb9["ann a"].since, wait_before + 60))
+check("restore: the save is cleared once loaded", G9.EnchantProDB.queues["Mage"] is None)
+T9.fire("CHAT_MSG_WHISPER", "crusader pls", "Dee D")
+check("restore: numbers carry on", qb9["dee d"].n == 4, qb9["dee d"].n)
+T9.npc = "Tra Der"
+tr = lua9.table(); tr.money = 0; tr["items"] = lua9.table()
+tg = lua9.table(); tg.link = "item:sword"; tg.name = "Sword"; tr.target = tg
+T9.trade = tr; G9.TradeFrame.shown = True
+T9.fire("TRADE_SHOW")
+check("queue: someone who opens trade without asking gets a number", qb9["tra der"] is not None and qb9["tra der"].n == 5,
+      qb9["tra der"] and qb9["tra der"].n)
+T9.fire("TRADE_CLOSED"); G9.TradeFrame.shown = False
+T9.time = T9.time + 7201
+T9.tick()
+check("queue: dropped after 2 hours without a word", qb9["ann a"] is None and qb9["dee d"] is None)
+
+# --- one order, several enchants
+lua10, G10, T10 = fresh()
+T10.fire("ADDON_LOADED", "EnchantPro"); T10.fire("PLAYER_LOGIN"); T10.fire("TRADE_SKILL_SHOW"); T10.runTimers()
+N10, EP10 = T10.ns, G10.EnchantPro
+qb10 = N10.buyers
+def wants10(key):
+    w = qb10[key].wants
+    return [(w[i].id, bool(w[i].done)) for i in range(1, len(w) + 1)] if w else []
+def trade10(name, item, mats, money=0):
+    T10.npc = name
+    tr = lua10.table(); tr.money = money
+    it = lua10.table()
+    for slot, (iid, q) in mats.items(): it[slot] = lua10.table(iid, q)
+    tr["items"] = it
+    tg = lua10.table(); tg.link = item; tg.name = item; tr.target = tg
+    T10.trade = tr; G10.TradeFrame.shown = True
+    T10.fire("TRADE_SHOW")
+def finish10(spell):
+    T10.fire("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", spell)
+    T10.time = T10.time + 5
+    EP10.accept()
+    T10.fire("TRADE_ACCEPT_UPDATE", 1, 1)
+    T10.fire("UI_INFO_MESSAGE", 0, "Trade complete.")
+    T10.fire("TRADE_CLOSED"); G10.TradeFrame.shown = False
+    T10.runTimers()
+T10.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Ann Zed")
+T10.fire("CHAT_MSG_WHISPER", "and +5 agi boots", "Ann Zed")
+check("order: a second enchant is added", wants10("ann zed") == [(13945, False), (13935, False)] and qb10["ann zed"].rec == 13945, wants10("ann zed"))
+T10.fire("CHAT_MSG_WHISPER", "+3 stam bracer actually", "Ann Zed")
+check("order: an enchant for the same slot replaces the first", wants10("ann zed") == [(13648, False), (13935, False)], wants10("ann zed"))
+T10.fire("CHAT_MSG_WHISPER", "crusader pls", "Ben B")
+EP10.updateCast()
+mt = G10.EnchantProCastButton.attrs["macrotext"] or ""
+check("no trade: Cast holds the first open enchant of the first order", "Enchant Bracer - Stamina" in mt, mt)
+trade10("Ann Zed", "item:boots", {1: (11174, 2)})
+check("order: the item picks the enchant from the order", EP10.plan() is not None and EP10.plan().id == 13935, EP10.plan() and EP10.plan().id)
+finish10(13935)
+check("order: one enchant done, the order waits for the next", wants10("ann zed") == [(13648, False), (13935, True)] and qb10["ann zed"].state == "asked" and qb10["ann zed"].kickAt is None,
+      (wants10("ann zed"), qb10["ann zed"].state))
+trade10("Ann Zed", "item:bracer", {1: (10940, 6)})
+finish10(13648)
+check("order: done when every enchant is", qb10["ann zed"].state == "done", qb10["ann zed"].state)
+T10.time = T10.time + 61
+T10.fire("CHAT_MSG_WHISPER", "+5 agi boots pls", "Ann Zed")
+check("order: asking after done is a new order at the back", qb10["ann zed"].n == 3 and wants10("ann zed") == [(13935, False)],
+      (qb10["ann zed"].n, wants10("ann zed")))
+# a saved order from before wants, and an enchant this character doesn't know
+G10.EnchantProDB.queues["Mage"] = lua10.eval("function(t) return { saved = t, list = { { key = 'old o', name = 'Old O', n = 50, state = 'asked', at = t, rec = 13945 }, { key = 'odd o', name = 'Odd O', n = 51, state = 'asked', at = t, wants = { { id = 99999 } } } } } end")(G10.time())
+N10.loadQueue()
+check("restore: an old order's enchant becomes its list", wants10("old o") == [(13945, False)], wants10("old o"))
+trade10("Odd O", "item:sword", {})
+ok, err = lua10.eval("function() return pcall(EnchantPro.plan) end")()
+check("an enchant you don't know in an order: no error", ok, err)
+T10.fire("TRADE_CLOSED"); G10.TradeFrame.shown = False
+
+# --- the queue on screen
+lua11, G11, T11 = fresh()
+T11.fire("ADDON_LOADED", "EnchantPro"); T11.fire("PLAYER_LOGIN"); T11.fire("TRADE_SKILL_SHOW"); T11.runTimers()
+N11 = T11.ns
+rg11 = lua11.eval("rawget")
+T11.tells = lua11.table()
+T11.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Ann Zed"); T11.runTimers()
+T11.fire("CHAT_MSG_WHISPER", "crusader pls", "Ben Yo"); T11.runTimers()
+tl = [t.text or "" for t in T11.tells.values()]
+check("reply: the first in line isn't told a place", tl and "in the queue" not in tl[0], tl)
+check("reply: the second hears their place", len(tl) >= 2 and "You're #2 in the queue." in tl[-1], tl)
+for i in range(1, 26):
+    T11.fire("CHAT_MSG_WHISPER", "crusader pls", "B%02d Qx" % i)
+T11.runTimers()
+G11.EnchantPro.togglePanel(True)
+N11.refresh()
+def row_name(i): return re.sub(r"\|c[0-9a-f]{8}|\|r", "", N11.rows[i].name.text or "")
+check("rows: numbered", "#1 " in row_name(1) and "Ann Zed" in row_name(1) and "#2 " in row_name(2), (row_name(1), row_name(2)))
+page11 = G11.EnchantProBuyers
+for _ in range(3): page11.scripts.OnMouseWheel(page11, -1)
+check("rows: the wheel scrolls the queue", "#4 " in row_name(1), row_name(1))
+more = N11.scroll.text.text or ""
+check("rows: says how many more", "3 more" in more and "more" in more, more)
+for _ in range(3): page11.scripts.OnMouseWheel(page11, 1)
+ann = N11.buyers["ann zed"]
+N11.addWant(ann, N11.REC[13935]); N11.tickWant(ann, 13945)
+T11.units["target"] = "Ben Yo"; T11.near["target"] = True
+T11.tick()
+N11.refresh()
+ar, br = row_of(N11, "ann zed", rg11), row_of(N11, "ben yo", rg11)
+sub = ar.sub.text or ""
+check("rows: every enchant of the order, done ones ticked", "+7 Sta Bracer" in sub and "+5 Agi Boots" in sub and "ReadyCheck-Ready" in sub, sub)
+check("rows: the first in range is marked", br.marked == True and ar.marked == False, (br.marked, ar.marked))
+check("bar: counts the queue", (G11.EnchantProCompact.text.text or "").startswith("27 in queue · 1 in range"), G11.EnchantProCompact.text.text)
+keys11 = [N11.toggles[i].key for i in range(1, len(N11.toggles) + 1)]
+check("no Trade switch any more", "autoTrade" not in keys11, keys11)
+
+# --- review fixes: trades count as word, prepayment carries, a buyer you can't serve leaves
+lua12, G12, T12 = fresh()
+T12.fire("ADDON_LOADED", "EnchantPro"); T12.fire("PLAYER_LOGIN"); T12.fire("TRADE_SKILL_SHOW"); T12.runTimers()
+N12, EP12, qb12 = T12.ns, G12.EnchantPro, T12.ns.buyers
+def trade12(name, item=None, mats=None, money=0, spell=None):
+    T12.npc = name
+    tr = lua12.table(); tr.money = money
+    it = lua12.table()
+    for slot, (iid, q) in (mats or {}).items(): it[slot] = lua12.table(iid, q)
+    tr["items"] = it
+    if item:
+        tg = lua12.table(); tg.link = item; tg.name = item; tr.target = tg
+    T12.trade = tr; G12.TradeFrame.shown = True
+    T12.fire("TRADE_SHOW")
+    if spell: T12.fire("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", spell)
+    T12.time = T12.time + 5
+    T12.fire("TRADE_ACCEPT_UPDATE", 1, 1)
+    T12.fire("UI_INFO_MESSAGE", 0, "Trade complete.")
+    T12.fire("TRADE_CLOSED"); G12.TradeFrame.shown = False
+    T12.runTimers()
+T12.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Mat Giver")
+T12.time = T12.time + 110 * 60
+trade12("Mat Giver", mats={1: (11176, 5)})
+T12.time = T12.time + 11 * 60
+T12.tick()
+check("a buyer who handed over mats isn't dropped as quiet", qb12["mat giver"] is not None and qb12["mat giver"].given[11176] == 5)
+G12.EnchantProDB.fulls[13945] = 10000; G12.EnchantProDB.fulls[13935] = 10000
+T12.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Pre Payer")
+T12.fire("CHAT_MSG_WHISPER", "+5 agi boots too", "Pre Payer")
+trade12("Pre Payer", money=20000)
+trade12("Pre Payer", item="item:bracer", spell=13945)
+pp12 = qb12["pre payer"]
+check("prepayment: what's left carries to the next enchant", pp12.state != "done" and pp12.paid == 10000, (pp12.state, pp12.paid))
+T12.fire("CHAT_MSG_WHISPER", "need an enchanter pls", "Can Not")
+T12.fire("CHAT_MSG_WHISPER", "LF " + FIERY, "Can Not")
+T12.time = T12.time + 11 * 60
+T12.tick()
+check("a numbered buyer you then can't serve leaves after 10 minutes", qb12["can not"] is None, qb12["can not"] and (qb12["can not"].cant, qb12["can not"].n))
 
 # --- saved settings from 0.2.0 (separate windows) load cleanly
 lua3 = runtime("EnchantProDB = { point = { 'CENTER', 'CENTER', -300, 0 }, shown = true, frames = { ledger = { point = { 'CENTER', 'CENTER', 10, 10 }, w = 460, h = 430 }, messages = { w = 520, h = 420 }, enchants = { w = 560, h = 400 }, panel = { w = 320, h = 290 } } }")

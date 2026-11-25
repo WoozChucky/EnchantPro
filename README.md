@@ -16,10 +16,18 @@ A WoW Forever addon for enchanters who sell enchants. It automates as much of th
 
    **The group invite.** A buyer asking for an enchant you have gets a group invite, so you see on the map where they are; the buyer list shows their zone. Someone who declines isn't invited again from public chat for 5 minutes, but a whisper still gets an invite. If the group is full or you aren't the leader, they wait until a spot frees. 15 seconds after their enchant they're taken out of the group again. Only people EnchantPro invited are removed, never a friend who was already with you. Turn these off with the Invite and Kick switches, or `/ep invite` and `/ep kick`.
 2. **Mats, if theirs.** The game needs the mats in *your* bags when you cast. With the buyer's mats, they trade you the mats first. The addon remembers what each buyer handed over.
-3. **The item.** The buyer opens trade with the item in the bottom "Will not be traded" slot. The addon opens trade by itself when a buyer comes in range. It reads the item's slot and picks the enchant that fits; `<` and `>` switch between them.
+3. **The item.** The buyer opens trade with the item in the bottom "Will not be traded" slot. Click the buyer's line when they're in range (the first one in range is highlighted) and the trade opens. It reads the item's slot and picks the enchant that fits; `<` and `>` switch between them.
 4. **The trade dock.** A panel beside the trade window shows where the sale stands (Asked, Mats, Item, Cast, Paid), the mats in your bags, and the payment: what's in the trade against what you're owed.
 5. **Cast and accept.** The dock's Cast button (or the one in the main window) casts the enchant onto the trade item; it glows when it's time to cast. The Accept button warns you if the item isn't enchanted yet or the trade is short.
 6. **After the trade.** The sale goes into the ledger, and the buyer gets a thank-you whisper (or a `/say` line).
+
+## The queue
+
+Every buyer you can serve gets a number when they first ask (`#1`, `#2`…), and keeps it when they ask again. The Buyers tab lists the queue in that order, with how long each has waited; the mouse wheel scrolls it. The first reply tells a buyer their place ("You're #3 in the queue.") when someone is ahead of them.
+
+One buyer is one order, even with several enchants: each one they name is added to the order (a second enchant for the same slot replaces the first, as a correction). The row lists them all and ticks each one off once cast; the dock picks the one that fits the item in the trade. The order is done when every enchant is.
+
+An order stays until it's done, you right-click it away, or the buyer has been quiet for 2 hours. The queue is saved, so a `/reload`, a disconnect or a restart keeps it; each character has its own.
 
 ## Prices
 
@@ -47,7 +55,7 @@ The Ledger tab shows today, the last 7 days and all time at a glance, a 7-day ch
 The game reserves these actions for the player:
 
 - casting
-- accepting the trade
+- opening and accepting the trade
 - posting in public chat
 
 On live Forever realms, addons can't send chat lines at all. Replies, the ad and the thank-you go into your chat box, and you press Enter to send them.

@@ -13,11 +13,11 @@ local function ui()
   return ns.DB.ui
 end
 
--- buyers waiting: listed, not done, an enchant you have
+-- the queue: orders waiting, and how many of them are in range
 local function waiting()
   local n, near = 0, 0
   for _, b in pairs(buyers) do
-    if not b.cant and b.state ~= "done" then
+    if ns.isWaiting(b) then
       n = n + 1
       if b.near then near = near + 1 end
     end
@@ -71,7 +71,7 @@ end
 function ns.updateExtras()
   local n, near = waiting()
   if mm then mm:SetBadge(n) end
-  if bar then bar.text:SetText(n .. " buyers · " .. near .. " in range") end
+  if bar then bar.text:SetText(n .. " in queue · " .. near .. " in range") end
 end
 
 function ns.buildExtras()
@@ -79,7 +79,7 @@ function ns.buildExtras()
     if mouse == "RightButton" then EP.postAd() else EP.togglePanel() end
   end, function()
     local n, near = waiting()
-    return "EnchantPro\n|cffffffff" .. n .. " buyers, " .. near .. " in range|r\n"
+    return "EnchantPro\n|cffffffff" .. n .. " in queue, " .. near .. " in range|r\n"
       .. "|cff808080Click: window - Right-click: post the ad - Drag: move|r"
   end)
   bar = Kit.compactBar("EnchantProCompact", ICON, ns.frameSave("compact"), "Post ad",

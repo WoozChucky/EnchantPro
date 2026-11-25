@@ -90,17 +90,18 @@ local function request(sender, text, src, where, guid)
   local b = buyerFor(sender)
   local t = now()
   if b.state == "done" and t - (b.doneAt or 0) < 60 then return end
-  if b.state == "done" then b.state = "asked" end
+  if b.state == "done" then b.state, b.n, b.wants, b.rec = "asked", nil, nil, nil end   -- a new order, at the back
   local changed = false
   if r then
-    changed = b.rec ~= r.id
-    b.rec, b.cant, b.slot = r.id, nil, r.slot
-  elseif unknown or a.effect then
+    b.cant = nil
+    changed = ns.addWant(b, r)
+  elseif (unknown or a.effect) and not b.rec then
     b.cant, b.want = true, unknown      -- asks for an enchant you don't have
   elseif a.anySlot then
     b.slot = firstSlot(a)
   end
   b.at, b.src, b.where = t, src, where
+  ns.enqueue(b)
   if not b.class and type(guid) == "string" and not isSecret(guid) and guid ~= "" then
     local ok, _, cls = pcall(GetPlayerInfoByGUID, guid)
     if ok and type(cls) == "string" then b.class = cls end
@@ -108,6 +109,9 @@ local function request(sender, text, src, where, guid)
   b.inGroup = groupUnit(b.name) ~= nil or nil
   local invited = wantsInvite(b, src) and invite(b)
   local inv = invited and " Group invite sent." or ""
+  -- the first answer tells them their place, when someone is ahead of them
+  local p = not b.replied and not b.asked and ns.place(b)
+  if p and p >= 2 then inv = inv .. " You're #" .. p .. " in the queue." end
 
   if b.new then
     b.new = nil

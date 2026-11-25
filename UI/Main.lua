@@ -33,7 +33,6 @@ local STATE_TEXT = {
   asked = "|cffffd200asked|r", mats = "|cff7fd4ffmats in|r", trading = "|cffffffffin trade|r",
   done = "|cff808080done|r",
 }
-local STATE_ORDER = { trading = 1, mats = 2, asked = 3, done = 4 }
 
 -- where a buyer is: in range, in your group, invited, waiting for a spot
 local function groupText(b)
@@ -44,16 +43,18 @@ local function groupText(b)
   return ""
 end
 
-local function sortedBuyers()
-  local list = {}
-  for _, b in pairs(buyers) do list[#list + 1] = b end
-  table.sort(list, function(a, b)
-    local oa, ob = STATE_ORDER[a.state] or 9, STATE_ORDER[b.state] or 9
-    if oa ~= ob then return oa < ob end
-    if (a.near and 1 or 0) ~= (b.near and 1 or 0) then return a.near == true end
-    return a.at > b.at
-  end)
-  return list
+local TICK = "|TInterface\\RaidFrame\\ReadyCheck-Ready:12|t"
+
+-- every enchant of the order: done ones ticked and green; nil when the order names none yet
+local function wantsText(b)
+  if not b.wants or #b.wants == 0 then return nil end
+  local parts = {}
+  for _, w in ipairs(b.wants) do
+    local r = ns.REC[w.id]
+    local label = r and r.label or "|cff808080an enchant you don't know|r"
+    parts[#parts + 1] = w.done and (TICK .. "|cff40ff40" .. label .. "|r") or ("|cffffffff" .. label .. "|r")
+  end
+  return table.concat(parts, "  ")
 end
 
 local function onOff(v) return v and "|cff40ff40ON|r" or "|cff808080OFF|r" end
@@ -143,14 +144,15 @@ local function buildBuyers(page)
     end)
     rows[i] = r
   end
+  ns.scroll = Kit.scroller(page, function() ns.refresh() end)
+  ns.scroll.text:SetPoint("TOPRIGHT", -2, -106)
 
-  local defs = { { "listen", "Listen" }, { "reply", "Reply" }, { "invite", "Invite" }, { "autoTrade", "Trade" },
-    { "autoKick", "Kick" }, { "thanks", "Thanks" } }
+  local defs = { { "listen", "Listen" }, { "reply", "Reply" }, { "invite", "Invite" }, { "autoKick", "Kick" },
+    { "thanks", "Thanks" } }
   local tips = {
     listen = "Look for buyers in Trade, General, LFG, say and yell.",
     reply = "Answer buyers with the price and mats (in the chat box - your Enter sends it).",
     invite = "Invite buyers to your group, so you see on the map where they are.",
-    autoTrade = "Open trade with buyers who come in range.",
     autoKick = "Take buyers out of the group 15 s after their enchant (only those EnchantPro invited).",
     thanks = "A thank-you after every enchant, saying what was paid.",
   }
@@ -158,7 +160,6 @@ local function buildBuyers(page)
     local key = d[1]
     local t = Kit.toggle(page, 68, 22, d[2], function() return ns.DB[key] end, function(v)
       ns.DB[key] = v
-      if key == "autoTrade" then EP.tradeBlocked = nil end
       ns.refresh()
     end)
     t.key = key
@@ -231,16 +232,25 @@ ns.refresh = function()
   end
   panel.status:SetText(status)
 
-  local list = sortedBuyers()
+  -- the queue: waiting in order, then just finished, then those you can't serve
+  local list = ns.queueList()
+  local visible = panel.visibleRows or 6
+  ns.scroll:Set(#list, visible)
+  local nextUp
+  for _, b in ipairs(list) do
+    if ns.isWaiting(b) and b.near then nextUp = b; break end
+  end
   for i, row in ipairs(rows) do
-    local b = i <= (panel.visibleRows or 6) and list[i] or nil
+    local b = i <= visible and list[ns.scroll.offset + i] or nil
     row.buyer = b
     if b then
       local rec = b.rec and ns.REC[b.rec]
-      local what = rec and rec.label or b.want or (b.slot and (SLOT[b.slot].label .. "?")) or "?"
-      row.name:SetText("|cff" .. Kit.classHex(b.class) .. b.name .. "|r")
-      row.sub:SetText(what .. "  |cff808080" .. sourceText(b) .. " - " .. age(b.at) .. "|r"
+      local what = wantsText(b) or (rec and rec.label) or b.want or (b.slot and (SLOT[b.slot].label .. "?")) or "?"
+      local p = ns.place(b)
+      row.name:SetText((p and ("|cffffd200#" .. p .. "|r ") or "") .. "|cff" .. Kit.classHex(b.class) .. b.name .. "|r")
+      row.sub:SetText(what .. "  |cff808080" .. sourceText(b) .. " - " .. age(b.since or b.at) .. "|r"
         .. (b.zone and ("  |cff7fd4ff" .. b.zone .. "|r") or ""))
+      row:SetMark(b == nextUp)
       row.icon:SetIcon(rec and spellIcon(rec.id) or nil)
       row:SetNear(b.near and b.state ~= "done")
       row.right:SetText(b.cant and "|cff808080not yours|r"

@@ -72,6 +72,8 @@ local function readTrade()
   -- anyone who opens trade with an item to enchant, or hands gold or mats over, is a buyer
   if t.name and (t.target or t.money > 0 or next(t.items)) then
     local b = buyerFor(t.name)
+    ns.enqueue(b)
+    b.at = now()   -- a trade is word from them
     if b.new then b.new = nil; b.src, b.where = "trade", "trade" end
     if b.state ~= "done" then b.state = "trading" end
   end
@@ -94,7 +96,10 @@ function EP.plan()
   local manual = ns.DB.manual and ns.REC[ns.DB.manual]
   if manual and EP.manualAt and now() - EP.manualAt < 20 and fits(manual, t) then return manual end
   local b = t and tradeBuyer()
-  if b and b.rec and ns.REC[b.rec] and fits(ns.REC[b.rec], t) then return ns.REC[b.rec] end
+  for _, id in ipairs(ns.openWants(b)) do
+    local r = ns.REC[id]
+    if r and fits(r, t) then return r end
+  end
   if t and t.target and t.target.slots then
     local list = candidates(t)
     if b and b.slot then
@@ -105,12 +110,15 @@ function EP.plan()
     return list[1]
   end
   if manual then return manual end
-  -- no trade: the newest buyer's enchant
-  local newest
-  for _, nb in pairs(buyers) do
-    if nb.rec and ns.REC[nb.rec] and nb.state ~= "done" and (not newest or nb.at > newest.at) then newest = nb end
+  -- no trade: the first open enchant of the first order in the queue
+  for _, qb in ipairs(ns.queueList()) do
+    if ns.isWaiting(qb) then
+      for _, id in ipairs(ns.openWants(qb)) do
+        if ns.REC[id] then return ns.REC[id] end
+      end
+    end
   end
-  return newest and ns.REC[newest.rec] or nil
+  return nil
 end
 
 -- what the buyer owes for r: owed (nil: can't say), mode, the mats you put in (list), the mats you lack (list).
@@ -233,6 +241,7 @@ local function tradeDone()
   local b = t.name and buyers[string.lower(shortName(t.name) or "")]
   if not b and not r then return end
   if not b then b = buyerFor(t.name); b.new = nil end
+  b.at = now()
 
   if r then
     local owed, mode, missing = quote(r, b, t)
@@ -249,8 +258,15 @@ local function tradeDone()
         if b.given[m.id] then b.given[m.id] = math.max(0, b.given[m.id] - m.q); if b.given[m.id] == 0 then b.given[m.id] = nil end end
       end
     end
-    b.paid, b.state, b.doneAt, b.rec = nil, "done", now(), nil
-    if ns.letGo then ns.letGo(b) end
+    local left = math.max(0, pre - owed)
+    b.paid = nil
+    if ns.tickWant(b, r.id) then
+      if left > 0 then b.paid = left end
+      b.state = (b.given and next(b.given)) and "mats" or "asked"   -- more enchants on this order
+    else
+      b.state, b.doneAt = "done", now()
+      if ns.letGo then ns.letGo(b) end
+    end
     if ns.DB.thanks then
       local line = thanksText(b, r.label, pre + got, tip, owed, owed)
       if ns.DB.thanksSay then toBox("/s " .. line) else whisper(b, line) end

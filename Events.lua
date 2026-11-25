@@ -52,26 +52,19 @@ local function tick()
   local tf = _G.TradeFrame
   local trading = EP.trade or (tf and tf:IsShown())
 
-  -- buyers you can see: near or not, and trade with the first one in range
+  -- buyers you can see: near or not (a click on their row opens the trade)
   for _, b in pairs(buyers) do
     b.unit = (b.state ~= "done" and not b.cant) and unitFor(b.name) or nil
     b.near = b.unit and near(b.unit) or false
   end
-  if ns.DB.autoTrade and not EP.tradeBlocked and not trading and not InCombatLockdown() then
-    for _, b in pairs(buyers) do
-      if b.near and (b.state == "asked" or b.state == "mats") and (b.tradeTries or 0) < 3 and t - (b.tradeTry or 0) > 8 then
-        openTrade(b, b.unit)
-        break
-      end
-    end
-  end
 
   ns.groupTick(t)
 
-  -- drop old lines: asked and never came (10 min, unless they're in your group), done (2 min)
+  -- drop old lines: waiting orders quiet for 2 hours, done (2 min), someone you can't serve (10 min)
   for key, b in pairs(buyers) do
     if (b.state == "done" and t - (b.doneAt or 0) > 120 and not b.kickAt)
-       or ((b.state == "asked") and t - b.at > 600 and not b.near and not b.inGroup) then
+       or ns.quiet(b, t)
+       or (not ns.isWaiting(b) and b.state == "asked" and t - b.at > 600 and not b.near and not b.inGroup) then
       buyers[key] = nil
     end
   end
@@ -125,6 +118,7 @@ local f = CreateFrame("Frame")
 local function listen(ev) pcall(f.RegisterEvent, f, ev) end
 listen("ADDON_LOADED")
 listen("PLAYER_LOGIN")
+listen("PLAYER_LOGOUT")
 
 local function registerAll()
   for _, ev in ipairs({ "CHAT_MSG_CHANNEL", "CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_WHISPER",
@@ -142,6 +136,7 @@ function EP.start()
   if EP.started then return end
   EP.started, EP.off = true, nil
   rebuildKnown()
+  ns.loadQueue()
   buildPanel()
   ns.buildDock()
   ns.buildExtras()
@@ -173,6 +168,8 @@ f:SetScript("OnEvent", function(_, ev, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, 
     EP.off = true
     listen("SKILL_LINES_CHANGED")
     C_Timer.After(5, function() if not EP.started and isEnchanter() then EP.start() end end)
+  elseif ev == "PLAYER_LOGOUT" then
+    if EP.started then ns.saveQueue() end
   elseif ev == "SKILL_LINES_CHANGED" then
     if not EP.started and isEnchanter() then EP.start() end
   elseif not EP.started then
@@ -237,7 +234,6 @@ f:SetScript("OnEvent", function(_, ev, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, 
     if a1 == ADDON then
       local fn = tostring(a2)
       if string.find(fn, "InitiateTrade", 1, true) or string.find(fn, "UNKNOWN", 1, true) then
-        EP.tradeBlocked = true
         say("The game does not let addons open trade by themselves here - click the buyer's line when they are near.")
       else
         say("The game blocked " .. fn .. ". Tell the author.")
@@ -267,14 +263,14 @@ local HELP = {
   "/ep matcost <item id or name> 5s - what a mat costs you (else Auctionator's price). off - forget it",
   "/ep messages - edit the ad, replies and thank-you (or the Messages button)",
   "/ep ad - show the ad.  /ep cd 90 - seconds between ads",
-  "/ep listen | reply | invite | trade | kick | thanks | whisper | sound - turn one on / off",
+  "/ep listen | reply | invite | kick | thanks | whisper | sound - turn one on / off",
   "/ep ledger - the ledger window.  /ep stats - today / 7 days / all time in chat.  /ep ledger reset",
   "/ep test <line> - would this chat line count as a buyer, and for which enchant?",
   "/ep compact - fold the window to one line (again: back) - /ep minimap - hide or show the minimap button",
   "Keys: Game Menu > Key Bindings > EnchantPro (Post ad, Cast enchant, Accept trade).",
 }
 
-local SWITCHES = { listen = "listen", reply = "reply", invite = "invite", trade = "autoTrade", kick = "autoKick",
+local SWITCHES = { listen = "listen", reply = "reply", invite = "invite", kick = "autoKick",
   thanks = "thanks", whisper = "whisper", sound = "sound" }
 
 SLASH_ENCHANTPRO1 = "/ep"
@@ -345,7 +341,6 @@ SlashCmdList.ENCHANTPRO = function(msg)
   elseif SWITCHES[cmd] then
     local k = SWITCHES[cmd]
     ns.DB[k] = not ns.DB[k]
-    if k == "autoTrade" then EP.tradeBlocked = nil end
     say(cmd .. ": " .. onOff(ns.DB[k]))
     ns.refresh()
   elseif cmd == "ledger" or cmd == "stats" then

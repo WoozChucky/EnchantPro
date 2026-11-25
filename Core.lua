@@ -113,7 +113,6 @@ local DEFAULTS = {
   adCooldown = 60,
   listen = true,        -- look for buyers in public chat
   reply = true,         -- answer buyers (in the chat box where the realm refuses addon chat)
-  autoTrade = true,     -- open trade with buyers in range
   invite = true,        -- invite buyers to the group, so you see where they are
   autoKick = true,      -- out of the group again after the enchant (only buyers EnchantPro invited)
   thanks = true,        -- a thank-you after every enchant
@@ -121,6 +120,8 @@ local DEFAULTS = {
   whisper = true,
   sound = true,
   shown = true,
+  queues = {},          -- [character] = the waiting orders, saved at logout / reload
+  nextOrder = 1,        -- the next queue number
 }
 
 
