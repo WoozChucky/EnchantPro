@@ -1,0 +1,13 @@
+<Bindings>
+  <Binding name="ENCHANTPRO_AD" header="ENCHANTPRO" category="EnchantPro">
+    EnchantPro_PostAd()
+  </Binding>
+  <Binding name="CLICK EnchantProCastButton:LeftButton" category="EnchantPro">
+  </Binding>
+  <Binding name="ENCHANTPRO_ACCEPT" category="EnchantPro">
+    EnchantPro_AcceptTrade()
+  </Binding>
+  <Binding name="ENCHANTPRO_PANEL" category="EnchantPro">
+    EnchantPro_TogglePanel()
+  </Binding>
+</Bindings>
