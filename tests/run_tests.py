@@ -68,7 +68,7 @@ ci, wi, clean = EP._test.channelIntent, EP._test.whisperIntent, EP._test.clean
 def chat(line):
     r = ci(clean(line))
     if not isinstance(r, tuple): return (r, None)
-    return (r[0], r[1].label if r[1] else None)
+    return (r[0], r[1].label if r[0] and r[1] else None)
 for line, want, label in [
     ("LF enchanter", True, None),
     ("WTB crusader", True, "Crusader Weapon"),
@@ -107,6 +107,62 @@ for line, want, label in [
 ]:
     got = wh(line)
     check(f"whisper '{line}' -> {want}, {label}", got[0] == want and got[1] == label, got)
+
+# --- linked enchants (raw lines, as the game sends them)
+def link(kind, data, text): return "|cffffd000|H" + kind + ":" + data + "|h[" + text + "]|h|r"
+CRUS = link("enchant", "20034", "Enchant Weapon - Crusader")
+STAM = link("enchant", "13945", "Enchant Bracer - Greater Stamina")
+AGI = link("spell", "13935:0", "Enchanting: Enchant Boots - Agility")
+STATS = link("enchant", "20025", "Enchant Chest - Greater Stats")
+FIERY = link("enchant", "13898", "Enchant Weapon - Fiery Weapon")
+PROF = link("trade", "Player-1:333:225:300", "Enchanting")
+FORMULA = link("item", "16252", "Formula: Enchant Weapon - Crusader")
+def chatL(line):
+    raw = EP._test.dropRecipeItems(line)
+    r = ci(clean(raw), EP._test.readLinks(raw))
+    if not isinstance(r, tuple): return (r, None, None)
+    if not r[0]: return (r[0], r[1], None)
+    return (True, r[1].label if r[1] else None, r[3] if len(r) > 3 else None)
+for line, want, label, extra in [
+    ("LF " + STAM, True, "+7 Sta Bracer", None),
+    (CRUS + " anyone?", True, "Crusader Weapon", None),
+    ("LF enchanter " + AGI, True, "+5 Agi Boots", None),
+    ("LF " + CRUS + " and " + AGI, True, "Crusader Weapon", None),
+    ("LF " + FIERY, True, None, "Fiery Weapon"),
+    ("WTS " + CRUS + " " + STAM + " your mats", "seller", None, None),
+    ("LF customers! " + CRUS + " " + AGI, "seller", None, None),
+    (CRUS + " " + STAM + " " + STATS + " pst", "seller", None, None),
+    ("LF " + CRUS + " " + STAM + " " + STATS, "seller", None, None),
+    ("WTB " + CRUS + " " + STAM + " " + STATS, True, "Crusader Weapon", None),
+    (PROF + " LF work, tips", "seller", None, None),
+    ("anyone? " + PROF, "seller", None, None),
+    ("WTB " + FORMULA, False, None, None),
+    ("LF enchanter for " + CRUS + ", tips appreciated", "seller", None, None),
+]:
+    got = chatL(line)
+    ok = (got[0] == want if want != "seller" else (got[0] is False and got[1] == "seller")) and \
+         (want is not True or (got[1] == label and got[2] == extra))
+    check(f"linked chat '{clean(line)}' -> {want}, {label or extra}", ok, got)
+
+wl = wi(clean(AGI), EP._test.readLinks(AGI))
+check("whisper with a link -> that enchant", wl[0] is True and wl[1].label == "+5 Agi Boots", wl)
+wl = wi(clean(FIERY), EP._test.readLinks(FIERY))
+check("whisper with an unknown link -> not yours", wl[0] is True and wl[1] is None and wl[3] == "Fiery Weapon", wl)
+
+# a seller's line puts them on the seller list: their later "LF" lines are skipped for an hour
+fire("CHAT_MSG_CHANNEL", "WTS " + CRUS + " " + STAM + " your mats", "Ench Guy", "", "2. Trade", "", "", 2, 2, "Trade")
+check("seller not listed", EP._test.buyers["ench guy"] is None)
+fire("CHAT_MSG_CHANNEL", "LF enchanter for crusader", "Ench Guy", "", "2. Trade", "", "", 2, 2, "Trade")
+check("seller's later LF line skipped", EP._test.buyers["ench guy"] is None)
+fire("CHAT_MSG_WHISPER", "crusader?", "Ench Guy")
+check("seller's whisper still counts", EP._test.buyers["ench guy"] is not None)
+EP._test.buyers["ench guy"] = None
+fire("CHAT_MSG_CHANNEL", "LF " + FIERY + " pls", "Al Fire", "", "2. Trade", "", "", 2, 2, "Trade")
+af = EP._test.buyers["al fire"]
+check("unknown linked enchant: listed as not yours", af is not None and af.cant and af.want == "Fiery Weapon", af and (af.cant, af.want))
+EP._test.buyers["al fire"] = None
+T.runTimers()
+T.tells = lua.table()
 
 # --- a whisper gets a reply in the whisper box
 fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Nx Thearabian")

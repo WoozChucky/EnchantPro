@@ -123,6 +123,7 @@ local DEFAULTS = {
 local DB
 local PANEL_MAX_ROWS = 20
 local buyers = {}       -- [lower-case name] = buyer
+EP.sellers = {}         -- [lower-case name] = when they last advertised enchanting: their chat lines are skipped
 local REC = {}          -- [recipe id] = this character's enchant: id, name, slot, eff, keys, tier, amount, reagents, label
 local knownList = {}    -- REC sorted: slot, then best first
 local myName = ""
@@ -453,36 +454,97 @@ local BUY_CUES = { "wtb", "lf", "lfm", "need", "needed", "anyone", "any", "anybo
   "pls", "plz", "please", "who", "can", "could" }
 local SELL_CUES = { "wts", "selling", "sell", "lfw", "lf work", "your mats", "ur mats", "my mats",
   "whisper me", "w me", "/w", "pst", "msg me", "can do", "services", "service", "cheap", "free" }
+-- only enchanters write these: they win over "lf" and "?" ("LF customers, can do [Crusader], your mats")
+local SELLER_CUES = { "customer", "customers", "tips appreciated", "tip appreciated", "your mats", "ur mats",
+  "my enchants", "all enchants", "for sale", "selling", "offering", "services", "lf work", "lfw", "wts" }
+
+-- Enchant links in a line as the game sends it: |Henchant:20034|h[Enchant Weapon - Crusader]|h, and spell links
+-- ("[Enchanting: Enchant ...]") alike. A profession link ([Enchanting]) is how enchanters advertise.
+local NO_LINKS = { n = 0, ids = {}, names = {}, trade = false }
+local function readLinks(text)
+  local L = { n = 0, ids = {}, names = {}, trade = false }
+  if type(text) ~= "string" then return L end
+  for kind, data, label in string.gmatch(text, "|H(%a+):(.-)|h(.-)|h") do
+    label = string.lower((string.gsub(label, "^%[(.*)%]$", "%1")))
+    if kind == "trade" then
+      L.trade = true
+    elseif kind == "enchant" or kind == "spell" then
+      local name = string.match(label, "^enchant .+") or string.match(label, "^[^:]+:%s*(enchant .+)$")
+      if name then
+        L.n = L.n + 1
+        L.ids[L.n] = tonumber(string.match(data, "^(%d+)"))
+        L.names[L.n] = name
+      end
+    end
+  end
+  return L
+end
+
+-- the first linked enchant you know; else nil and the label of the first one you don't ("not yours")
+local function linkedEnchant(L)
+  local unknown
+  for i = 1, L.n do
+    local r = L.ids[i] and REC[L.ids[i]]
+    if not r then
+      for _, k in ipairs(knownList) do if string.lower(k.name) == L.names[i] then r = k end end
+    end
+    if r then return r end
+    if not unknown then
+      local p = parseRecipe(0, { name = "Enchant" .. string.sub(L.names[i], 8) })
+      unknown = p and p.label or L.names[i]
+    end
+  end
+  return nil, unknown
+end
+
+-- recipe items ([Formula: Enchant ...]) are bought and sold as items: they don't ask for an enchant
+local function dropRecipeItems(text)
+  return (string.gsub(text, "|Hitem:[^|]*|h%[[^%]]*:[^%]]*%]|h", ""))
+end
 
 local function service(lower)
   for _, w in ipairs(SERVICE) do if has(lower, w) then return true end end
   return false
 end
 
--- A line in public chat: a buyer? Returns true, enchant (or nil), analysis.
-local function channelIntent(lower)
+-- A line in public chat: a buyer? Returns true, enchant (or nil), analysis, and the label of a linked enchant you
+-- don't have. Not a buyer: false, and "seller" when the line advertises enchanting.
+local function channelIntent(lower, links)
+  links = links or NO_LINKS
   local a = analyze(lower)
-  local r = findEnchant(a)
-  local svc = service(lower)
+  local lr, unknown = linkedEnchant(links)
+  local r = lr or (not unknown and findEnchant(a)) or nil
+  local svc = service(lower) or links.n > 0
   -- an enchant named by a word only enchants use ("crusader", "fiery") counts without "enchant" or a slot
   local distinct = false
   for _, k in ipairs(r and r.keys or {}) do if DISTINCT[k] then distinct = true end end
+  if links.trade then return false, "seller" end                    -- [Enchanting]: an enchanter's own link
   if not svc and not distinct and not (a.effect and a.anySlot) then return false end
-  if has(lower, "wts") or has(lower, "lfw") or has(lower, "lf work") or has(lower, "disenchant") or has(lower, "de") then return false end
-  local buy = string.find(lower, "?", 1, true) ~= nil
-  for _, w in ipairs(BUY_CUES) do if buy then break end; buy = has(lower, w) end
-  if buy then return true, r, a end
-  for _, w in ipairs(SELL_CUES) do
-    if string.find(lower, w, 1, true) then return false end
+  if has(lower, "disenchant") or has(lower, "de") then return false end
+  local wtb = has(lower, "wtb")
+  if not wtb then
+    for _, w in ipairs(SELLER_CUES) do
+      if has(lower, w) then return false, "seller" end
+    end
+    if links.n >= 3 then return false, "seller" end                 -- a list of enchants is a price list
   end
-  if svc and not a.effect and not a.anySlot then return false end   -- "enchanting 225 ding" and the like
-  return true, r, a
+  local buy = wtb or string.find(lower, "?", 1, true) ~= nil
+  for _, w in ipairs(BUY_CUES) do if buy then break end; buy = has(lower, w) end
+  if buy then return true, r, a, unknown end
+  for _, w in ipairs(SELL_CUES) do
+    if string.find(lower, w, 1, true) then return false, "seller" end
+  end
+  if links.n == 0 and svc and not a.effect and not a.anySlot then return false end   -- "enchanting 225 ding"
+  return true, r, a, unknown   -- "[Enchant Weapon - Crusader]" with no cue at all: nobody sells like that
 end
 
 -- A whisper: true (a buyer), "price", "mats" or false; then the enchant and the analysis.
-local function whisperIntent(lower)
+local function whisperIntent(lower, links)
+  links = links or NO_LINKS
   local a = analyze(lower)
-  local r = findEnchant(a)
+  local lr, unknown = linkedEnchant(links)
+  local r = lr or (not unknown and findEnchant(a)) or nil
+  if unknown and not r then return true, nil, a, unknown end
   local price = has(lower, "how much") or has(lower, "price") or has(lower, "prices") or has(lower, "cost") or has(lower, "costs")
   local mats = has(lower, "mats") or has(lower, "mat") or has(lower, "materials") or has(lower, "reagents")
   if r or a.effect or a.anySlot then
@@ -784,10 +846,26 @@ local function request(sender, text, src, where)
   if isSecret(sender) or isSecret(text) or type(sender) ~= "string" or type(text) ~= "string" then return end
   local name = shortName(sender)
   if not name or string.lower(name) == string.lower(myName) then return end
+  local key = string.lower(name)
+  if src ~= "whisper" and EP.sellers[key] and now() - EP.sellers[key] < 3600 then return end
+  text = dropRecipeItems(text)
+  local links = readLinks(text)
   local lower = clean(text)
-  local intent, r, a
-  if src == "whisper" then intent, r, a = whisperIntent(lower) else intent, r, a = channelIntent(lower) end
-  if not intent then return end
+  local intent, r, a, unknown
+  if src == "whisper" then
+    intent, r, a, unknown = whisperIntent(lower, links)
+  else
+    intent, r, a, unknown = channelIntent(lower, links)
+  end
+  if not intent then
+    -- an enchanter advertising: not a buyer for the next hour, and off the list if a line of theirs got there
+    if r == "seller" then
+      EP.sellers[key] = now()
+      local old = buyers[key]
+      if old and old.src ~= "whisper" and old.state == "asked" then buyers[key] = nil; if refresh then refresh() end end
+    end
+    return
+  end
 
   if intent == "price" then sayPrices(buyers[string.lower(name)] or { name = name, full = sender }); return end
   if intent == "mats" and r then
@@ -803,8 +881,8 @@ local function request(sender, text, src, where)
   if r then
     changed = b.rec ~= r.id
     b.rec, b.cant, b.slot = r.id, nil, r.slot
-  elseif a.effect then
-    b.cant = true                       -- asks for an enchant you don't have
+  elseif unknown or a.effect then
+    b.cant, b.want = true, unknown      -- asks for an enchant you don't have
   elseif a.anySlot then
     b.slot = firstSlot(a)
   end
@@ -814,7 +892,7 @@ local function request(sender, text, src, where)
     b.new = nil
     playSound()
     say((b.cant and "|cff808080Buyer|r " or "|cff40ff40Buyer|r ") .. name .. " - "
-      .. (r and r.label or b.slot and SLOT[b.slot].label or "an enchant") .. " (" .. (where or src) .. ")"
+      .. (r and r.label or b.want or b.slot and SLOT[b.slot].label or "an enchant") .. " (" .. (where or src) .. ")"
       .. (b.cant and " - |cff808080you don't have that enchant.|r" or "."))
   end
 
@@ -1824,7 +1902,7 @@ refresh = function()
     local b = i <= (panel.visibleRows or 6) and list[i] or nil
     row.buyer = b
     if b then
-      local what = b.rec and REC[b.rec] and REC[b.rec].label or (b.slot and (SLOT[b.slot].label .. "?")) or "?"
+      local what = b.rec and REC[b.rec] and REC[b.rec].label or b.want or (b.slot and (SLOT[b.slot].label .. "?")) or "?"
       row.left:SetText(b.name .. "  |cffa0a0a0" .. what .. "|r")
       row.right:SetText(b.cant and "|cff808080not yours|r"
         or ((STATE_TEXT[b.state] or b.state) .. (b.near and b.state ~= "done" and " |cff40ff40near|r" or "")))
@@ -2105,19 +2183,24 @@ SlashCmdList.ENCHANTPRO = function(msg)
         money(T.matsCost), T.sales, T.theirMats, money(T.short)))
     end
   elseif cmd == "test" then
-    local lower = clean(rest)
-    local ok, r = channelIntent(lower)
-    local wok, wr = whisperIntent(lower)
-    local function what(x) return x and x.label or "no enchant of yours" end
-    say("In chat: " .. (ok and ("|cff40ff40buyer|r, " .. what(r)) or "|cff808080not a buyer|r")
+    local raw = dropRecipeItems(rest)
+    local links = readLinks(raw)
+    local lower = clean(raw)
+    local ok, r, _, cu = channelIntent(lower, links)
+    local wok, wr, _, wu = whisperIntent(lower, links)
+    local function what(x, u)
+      return type(x) == "table" and x.label or (u and (u .. " - not yours")) or "no enchant of yours"
+    end
+    say("In chat: " .. (ok and ("|cff40ff40buyer|r, " .. what(r, cu))
+      or (r == "seller" and "|cffff8040an enchanter selling|r" or "|cff808080not a buyer|r"))
       .. ".  As a whisper: " .. (wok == "price" and "price question" or wok == "mats" and ("mats question, " .. what(wr))
-        or wok and ("|cff40ff40buyer|r, " .. what(wr)) or "|cff808080ignored|r") .. ".")
+        or wok and ("|cff40ff40buyer|r, " .. what(wr, wu)) or "|cff808080ignored|r") .. ".")
   else
     say("Unknown command. /ep help")
   end
 end
 
 -- for the offline tests
-EP._test = { channelIntent = channelIntent, whisperIntent = whisperIntent, analyze = analyze, findEnchant = findEnchant,
+EP._test = { readLinks = readLinks, dropRecipeItems = dropRecipeItems, channelIntent = channelIntent, whisperIntent = whisperIntent, analyze = analyze, findEnchant = findEnchant,
   clean = clean, parseMoney = parseMoney, money = money, quote = quote, buyers = buyers, REC = function() return REC end,
   knownList = function() return knownList end, tradeLine = tradeLine, cycle = cycle }
