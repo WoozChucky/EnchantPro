@@ -1,8 +1,21 @@
 ## Interface: 16001
 ## Title: EnchantPro
 ## Notes: Sell enchants: finds buyers in chat, knows your enchants and their mats, opens trade, checks mats and payment, casts the right enchant on the trade item, keeps a ledger. /ep
-## Version: 0.2.0
+## Version: 0.3.0
 ## SavedVariables: EnchantProDB
 ## OptionalDeps: Auctionator
 
-EnchantPro.lua
+Core.lua
+Enchants.lua
+Chat.lua
+Send.lua
+Ledger.lua
+Party.lua
+Buyers.lua
+Trade.lua
+UI\Kit.lua
+UI\Tabs.lua
+UI\Main.lua
+UI\Dock.lua
+UI\Extras.lua
+Events.lua

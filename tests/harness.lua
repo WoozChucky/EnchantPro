@@ -26,8 +26,27 @@ function Frame:SetText(t) self.text = t end
 function Frame:GetText() return self.text end
 function Frame:RegisterEvent(e) self.events[e] = true end
 function Frame:RegisterUnitEvent(e) self.events[e] = true end
+function Frame:GetName() return self.name end
+function Frame:SetPoint(...) self.point = { ... } end
+function Frame:ClearAllPoints() self.point = nil end
 function Frame:GetPoint() return "CENTER", nil, "CENTER", 0, 0 end
-function CreateFrame(kind, name) local f = T.stub(); if name then _G[name] = f end; T.frames = T.frames or {}; T.frames[#T.frames + 1] = f; return f end
+function CreateFrame(kind, name, parent, template)
+  -- T.badTemplates[name] = true: that template is missing on this client, as CreateFrame errors then
+  if template and T.badTemplates then
+    for t in string.gmatch(template, "[^,%s]+") do
+      if T.badTemplates[t] then error("CreateFrame: Couldn't find inherited node \"" .. t .. "\"") end
+    end
+  end
+  local f = T.stub()
+  f.kind, f.template, f.parent, f.name = kind, template, parent, name
+  if template and (string.find(template, "ButtonFrameTemplate") or string.find(template, "PortraitFrameTemplate")) then
+    f.portrait, f.TitleText, f.Inset = T.stub(), T.stub(), T.stub()
+    if not T.noCloseButton then f.CloseButton = T.stub() end
+  end
+  if name then _G[name] = f end
+  T.frames = T.frames or {}; T.frames[#T.frames + 1] = f
+  return f
+end
 UIParent = T.stub()
 DEFAULT_CHAT_FRAME = T.stub()
 TradeFrame = T.stub(); TradeFrame.shown = false
@@ -139,11 +158,11 @@ function Frame:SetSize(w, h)
   self.w, self.h = w, h
   if self.scripts.OnSizeChanged then self.scripts.OnSizeChanged(self, w, h) end
 end
-function Frame:GetSize() return self.w or 100, self.h or 100 end
+function Frame:GetSize() return rawget(self, "w") or 100, rawget(self, "h") or 100 end
 function Frame:SetWidth(w) self.w = w end
 function Frame:SetHeight(h) self.h = h end
-function Frame:GetWidth() return self.w or 100 end
-function Frame:GetHeight() return self.h or 100 end
+function Frame:GetWidth() return rawget(self, "w") or 100 end
+function Frame:GetHeight() return rawget(self, "h") or 100 end
 function Frame:GetFrameLevel() return 1 end
 function Frame:StartSizing() T.sizing = self end
 T.combat = false
@@ -218,7 +237,12 @@ TradeRecipientItem7ItemButton = T.stub()
 
 -- units around you: T.units[unit] = full name; T.near[unit] = in trade range
 T.units = {}
-function UnitExists(u) return T.units[u] ~= nil or u == "player" end
+function UnitExists(u)
+  if T.units[u] ~= nil or u == "player" then return true end
+  local i = string.match(u, "^party(%d)$")
+  return i ~= nil and T.party[tonumber(i)] ~= nil
+end
+C_Map.GetMapInfo = function(id) local n = ({ [1454] = "Orgrimmar", [1411] = "Durotar" })[id]; return n and { name = n } or nil end
 function UnitIsPlayer(u) return true end
 local baseUnitName = UnitName
 local function split2(n) if not n then return nil end local a, b = string.match(n, "^(%S+) (.+)$"); if a then return a, b end; return n end
@@ -232,3 +256,16 @@ T.tells = {}
 DEFAULT_CHAT_FRAME.editBox = T.stub()
 function DEFAULT_CHAT_FRAME.editBox:Insert(text) T.tells[#T.tells].text = text end
 function ChatFrame_SendTell(name) T.tells[#T.tells + 1] = { name = name } end
+
+-- art, classes, the minimap
+RAID_CLASS_COLORS = {
+  MAGE = { r = 0.25, g = 0.78, b = 0.92, colorStr = "ff3fc7eb" },
+  WARRIOR = { r = 0.78, g = 0.61, b = 0.43, colorStr = "ffc69b6d" },
+  PRIEST = { r = 1, g = 1, b = 1, colorStr = "ffffffff" },
+  ROGUE = { r = 1, g = 0.96, b = 0.41 },
+}
+function SetPortraitToTexture(tex, path) tex.portraitPath = path end
+C_Spell = { GetSpellTexture = function(id) return "tex:" .. tostring(id) end }
+T.guids = {}   -- [guid] = class file
+function GetPlayerInfoByGUID(guid) local c = T.guids[guid]; if c then return c, c, "Human", "Human", 2, "x", "" end end
+Minimap = T.stub()

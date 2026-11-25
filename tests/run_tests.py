@@ -6,7 +6,16 @@ import lupa.lua51 as LUPA
 here = pathlib.Path(__file__).parent
 addon = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else here.parent
 harness = (here / "harness.lua").read_text(encoding="utf-8")
-src = (addon / "EnchantPro.lua").read_text(encoding="utf-8")
+
+def toc_files():
+    """The .lua files the game loads, in the .toc's order."""
+    out = []
+    for line in (addon / "EnchantPro.toc").read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and line.lower().endswith(".lua"):
+            out.append(line.replace("\\", "/"))
+    return out
+FILES = toc_files()
 
 fails = 0
 def check(name, ok, extra=""):
@@ -15,10 +24,20 @@ def check(name, ok, extra=""):
     if not ok: fails += 1
 
 def runtime(pre=""):
+    """A fresh game: the fake API, then every file of the .toc sharing one private table, as the game does."""
     lua = LUPA.LuaRuntime(unpack_returned_tuples=True)
     lua.execute(pre + "\n" + harness)
-    lua.eval("function(src) local f, e = loadstring(src, 'EnchantPro.lua'); if not f then error(e) end; return f end")(src)("EnchantPro")
+    lua.execute("T.baseGlobals = {}; for k in pairs(_G) do T.baseGlobals[k] = true end")
+    load =lua.eval("function(src, path, ns) local f, e = loadstring(src, path); if not f then error(e) end; f('EnchantPro', ns) end")
+    ns = lua.table()
+    for f in FILES:
+        load((addon / f).read_text(encoding="utf-8"), f, ns)
+    lua.globals().T.ns = ns      # the private table, for tests only (T is the harness's)
     return lua
+
+on_disk = sorted(p.relative_to(addon).as_posix() for p in addon.rglob("*.lua")
+                 if "tests" not in p.relative_to(addon).parts and not p.relative_to(addon).parts[0].startswith("."))
+check("toc lists every .lua file", sorted(FILES) == on_disk and all((addon / f).exists() for f in FILES), (FILES, on_disk))
 
 lua = runtime()
 G = lua.globals()
@@ -49,6 +68,8 @@ fire("PLAYER_LOGIN")
 check("login on an enchanter starts", EP.started == True)
 check("asks to open Enchanting once", any("Open your Enchanting window once" in p for p in prints()), prints())
 check("cast button says open Enchanting", "Open your Enchanting" in (G.EnchantProCastButton.text or ""), G.EnchantProCastButton.text)
+check("default fee: none, tips only", G.EnchantProDB.fee == 0, G.EnchantProDB.fee)
+slash("fee 20s")   # the sales below charge a fee; tips only is tested further down
 
 # --- the profession window teaches the enchants
 fire("TRADE_SKILL_SHOW")
@@ -171,7 +192,7 @@ b = EP._test.buyers["nx thearabian"]
 check("buyer listed with the enchant", b is not None and b.rec == 13945, b and b.rec)
 tells = list(T.tells.values())
 check("reply goes to the tell box for the full name", len(tells) == 1 and tells[0].name == "Nx Thearabian", [dict(t) for t in tells])
-check("reply names enchant, fee and mats", tells and "+7 Sta Bracer: 20s tip with your mats (5 Dream Dust - trade them first)" in (tells[0].text or ""), tells and tells[0].text)
+check("reply names enchant, fee and mats", tells and "+7 Sta Bracer: 20s with your mats (5 Dream Dust - trade them first)" in (tells[0].text or ""), tells and tells[0].text)
 check("cast button holds the buyer's enchant", G.EnchantProCastButton.attrs["macrotext"] == "/cast Enchant Bracer - Greater Stamina", G.EnchantProCastButton.attrs["macrotext"])
 check("cast button flags missing mats", "(no mats)" in G.EnchantProCastButton.text, G.EnchantProCastButton.text)
 
@@ -281,34 +302,418 @@ for _ in range(4):
 check("2H item: weapon and 2H enchants", slots == {"weapon", "2h"}, slots)
 fire("TRADE_CLOSED")
 
+# --- the trade dock: steps, mats, payment, its own Cast button
+NS = T.ns
+fire("CHAT_MSG_WHISPER", "crusader please", "Dee Dock")
+T.runTimers()
+T.npc = "Dee Dock"
+bags = T.bags
+T.bags = tbl({})
+set_trade(money=0)
+fire("TRADE_SHOW")
+st = NS.dockState()
+dock = G.EnchantProDock
+check("dock: empty trade", st.done == 1 and st.current == 2 and st.flags[1] and not st.flags[2], (st.done, st.current))
+check("dock shows with the trade", dock is not None and dock.shown)
+check("dock lists the mats", st.mats[1].need == 4 and st.mats[1].have == 0, st.mats[1] and (st.mats[1].have, st.mats[1].need))
+T.bags = bags
+mid = T.ns.dockState().mats[1].id
+T.bags[mid] = 7
+fire("BAG_UPDATE_DELAYED")
+check("dock mats follow the bags", "7/" in (dock.mats[1].count.text or ""), dock.mats[1].count.text)
+T.bags[mid] = None
+set_trade(money=0, target={"link": "item:sword", "name": "Sword"})
+fire("TRADE_TARGET_ITEM_CHANGED")
+st = NS.dockState()
+check("dock: mats in bags + item fits -> current Cast", st.current == 4 and st.flags[2] and st.flags[3], (st.done, st.current))
+check("dock cast pulses when it's time to cast", G.EnchantProDockCast.pulsing == True)
+check("dock cast matches panel cast", G.EnchantProDockCast.attrs["macrotext"] is not None
+      and G.EnchantProDockCast.attrs["macrotext"] == G.EnchantProCastButton.attrs["macrotext"], G.EnchantProDockCast.attrs["macrotext"])
+set_trade(money=100000, target={"link": "item:sword", "name": "Sword", "ench": "Crusader"})
+fire("TRADE_MONEY_CHANGED")
+st = NS.dockState()
+check("dock: enchanted and paid -> done 5", st.done == 5 and st.current is None, (st.done, st.current))
+fire("TRADE_CLOSED")
+check("dock hides when the trade closes", not dock.shown)
+T.npc = "Some Stranger"
+set_trade(money=0, target={"link": "item:bracer", "name": "Bracers"})
+fire("TRADE_SHOW")
+st = NS.dockState()
+check("dock: stranger", st.buyer is not None and not st.flags[1] and dock.shown, st.flags[1])
+T.combat = True
+before = G.EnchantProDockCast.attrs["macrotext"]
+fire("TRADE_CLOSED")
+check("dock in combat waits", dock.shown and G.EnchantProDockCast.attrs["macrotext"] == before)
+T.combat = False
+fire("PLAYER_REGEN_ENABLED")
+check("dock hides after combat", not dock.shown)
+EP._test.buyers["dee dock"] = None; EP._test.buyers["some stranger"] = None
+T.runTimers(); T.tells = lua.table()
+
 # --- the ad
 G.EnchantProDB.adList[13945] = True; G.EnchantProDB.adList[20034] = True
 advance(100)
 EP.postAd()
 T.runTimers()
 oc = called("OpenChat")
-check("ad in the chat box", oc and oc[-1][1] == "/2 WTS Enchants: +7 Sta Bracer / Crusader Weapon. Your mats + 20s tip, or full price with my mats. Whisper me!", oc and oc[-1])
+check("ad in the chat box", oc and oc[-1][1] == "/2 WTS Enchants: +7 Sta Bracer / Crusader Weapon. Your mats, 20s fee - or full price with my mats. Whisper me!", oc and oc[-1])
 
-# --- windows
+# --- one window with tabs: Buyers / Enchants / Messages / Ledger
+panel = G.EnchantProPanel
+pages = {"buyers": G.EnchantProBuyers, "enchants": G.EnchantProEnchants, "messages": G.EnchantProMessages, "ledger": G.EnchantProLedger}
+def shown_pages(): return sorted(k for k, f in pages.items() if f is not None and f.shown)
+slash("ledger")
+check("/ep ledger shows ledger tab", panel.shown and panel.tabs.current == 4 and shown_pages() == ["ledger"], (panel.shown, shown_pages()))
+slash("enchants")
+check("tabs: one page at a time", shown_pages() == ["enchants"], shown_pages())
+
 ef = G.EnchantProEnchants
-ef.Show(ef)
-check("enchants window lists all 9 in order", [ef.rows[i].rec.label for i in range(1, 10)] == labels, [ef.rows[i].rec.label for i in range(1, 10)])
-ef.SetSize(ef, 600, 300)
-check("enchants window rows follow the height", ef.visible == 9, ef.visible)
+check("enchants tab lists all 9 in order", [ef.rows[i].rec.label for i in range(1, 10)] == labels, [ef.rows[i].rec.label for i in range(1, 10)])
+def rows_shown(f): return sum(1 for i in range(1, 41) if f.rows[i].shown)
+panel.SetSize(panel, 600, 300); small = rows_shown(ef)
+panel.SetSize(panel, 600, 640); big = rows_shown(ef)
+check("enchants rows follow the window height", small < 9 and big == 9, (small, big))
 row = ef.rows[2]
 row.fee.scripts.OnEditFocusGained(row.fee)
 row.fee.SetText(row.fee, "35s")
 row.fee.scripts.OnEditFocusLost(row.fee)
 check("fee edit saves for that enchant", G.EnchantProDB.fees[row.rec.id] == 3500, G.EnchantProDB.fees[row.rec.id])
+slash("messages")
 mf = G.EnchantProMessages
-mf.Show(mf)
-check("messages window: 4 editors", len(list(mf.eds.values())) == 4)
+check("messages tab: 4 editors", shown_pages() == ["messages"] and len(list(mf.eds.values())) == 4)
+slash("ledger")
 lf = G.EnchantProLedger
-lf.Show(lf)
-check("ledger shows entries", "Nx Thearabian" in (lf.rows[3].text or "") or "Nx Thearabian" in (lf.rows[2].text or ""), [lf.rows[i].text for i in (1, 2, 3)])
-panel = G.EnchantProPanel
-panel.SetSize(panel, 400, 500)
-check("panel rows follow the height", panel.visibleRows == 17, panel.visibleRows)
+check("ledger shows entries", any("Nx Thearabian" in (lf.rows[i].text or "") for i in (1, 2, 3, 4)), [lf.rows[i].text for i in (1, 2, 3)])
+slash("ledger")
+check("/ep ledger again hides the window", not panel.shown)
+slash("")
+check("/ep shows it again on the Buyers tab", panel.shown and shown_pages() == ["buyers"], shown_pages())
+panel.SetSize(panel, 600, 400); low = panel.visibleRows
+panel.SetSize(panel, 600, 640); high = panel.visibleRows
+check("buyer rows follow the height", 1 <= low < high, (low, high))
+
+# --- buyer rows: class colour, icon, in-range dot
+def row_for(key):
+    for i in range(1, 21):
+        r = T.ns.rows[i]
+        if r and r.shown and r.buyer and r.buyer.key == key: return r
+T.guids["Player-1-0AB"] = "MAGE"
+fire("CHAT_MSG_WHISPER", "need crusader pls", "Holy Bread", "", "", "", "", 0, 0, "", 0, 7, "Player-1-0AB")
+hb = row_for("holy bread")
+check("buyer row class colour", hb is not None and "3fc7eb" in (hb.name.text or ""), hb and hb.name.text)
+check("buyer row icon from recipe", hb is not None and hb.icon.icon == "tex:20034", hb and hb.icon.icon)
+check("buyer row says what and where", hb is not None and "Crusader Weapon" in (hb.sub.text or "") and "whisper" in (hb.sub.text or ""), hb and hb.sub.text)
+fire("CHAT_MSG_WHISPER", "crusader?", "Plain Jane")
+pj = row_for("plain jane")
+check("buyer row without GUID is white", pj is not None and "|cffffffff" in (pj.name.text or ""), pj and pj.name.text)
+EP._test.buyers["holy bread"] = None; EP._test.buyers["plain jane"] = None
+T.runTimers(); T.tells = lua.table()
+
+# --- the window waits for combat to end
+T.combat = True
+slash("")
+check("toggle in combat waits", panel.shown, panel.shown)
+T.combat = False
+fire("PLAYER_REGEN_ENABLED")
+check("hidden after combat", not panel.shown)
+slash("")
+T.combat = True
+tb4 = panel.tabs.buttons[4]
+tb4.scripts.OnClick(tb4)
+check("tab click in combat waits", shown_pages() == ["buyers"], shown_pages())
+T.combat = False
+fire("PLAYER_REGEN_ENABLED")
+check("tab switches after combat", panel.shown and shown_pages() == ["ledger"], (panel.shown, shown_pages()))
+EP.showTab("buyers")
+
+# --- the ledger dashboard: days, best sellers, who owes
+NS = T.ns
+real_ledger = G.EnchantProDB.ledger
+day0 = NS.dayStart()
+def sale(t, en, p, g, pre=0, tip=0, mode="mats"):
+    return tbl({"t": t, "k": "sale", "n": "X", "en": en, "p": p, "g": g, "pre": pre, "tip": tip, "mode": mode})
+G.EnchantProDB.ledger = lua.table(
+    sale(day0 + 3600, "+7 Sta Bracer", 2000, 5000, tip=1000),
+    tbl({"t": day0 + 7200, "k": "pay", "n": "Y", "g": 200}),
+    sale(day0 - 2 * 86400 + 3600, "Crusader Weapon", 1000, 1000),
+    sale(day0 - 2 * 86400 + 7200, "Crusader Weapon", 2000, 2000),
+    sale(day0 - 8 * 86400 + 3600, "Crusader Weapon", 9999, 9999),
+    sale(day0 - 3600, "+5 Agi Boots", 2000, 0),
+    sale(day0 - 1800, "+5 Agi Boots", 3000, 1000),
+)
+days = NS.ledgerDays(7)
+got = [(days[i].income, days[i].tips) for i in range(1, 8)]
+check("ledgerDays groups by day", got[6] == (5200, 1000) and got[4] == (3000, 0) and got[5] == (1000, 0)
+      and sum(x[0] for x in got) == 9200 and days[7].day == day0, got)
+best = NS.bestSellers(3)
+names = [(best[i].label, best[i].count, best[i].income) for i in range(1, len(best) + 1)]
+check("bestSellers order", names[:2] == [("Crusader Weapon", 3, 12999), ("+7 Sta Bracer", 1, 5000)], names)
+n, c = NS.owing()
+check("owing counts short and unpaid", (n, c) == (2, 4000), (n, c))
+G.EnchantProDB.shown = True
+slash("ledger")
+lf = G.EnchantProLedger
+want = NS.money(NS.net(NS.ledgerSum(day0)))
+check("ledger tab tiles", lf.tiles[1].value.text is not None and want in lf.tiles[1].value.text, (lf.tiles[1].value.text, want))
+check("ledger tab best sellers", "Crusader Weapon" in (lf.best[1].text or ""), lf.best[1].text)
+check("ledger tab owing line", "2" in (lf.owing.text or "") and NS.money(4000) in (lf.owing.text or ""), lf.owing.text)
+G.EnchantProDB.ledger = real_ledger
+slash("")
+
+# --- minimap button, compact bar, new-buyer pop-up
+def clear_buyers():
+    for k in list(EP._test.buyers.keys()): EP._test.buyers[k] = None
+    T.ns.refresh()
+clear_buyers()
+mm = G.EnchantProMinimapButton
+toast = G.EnchantProToast
+check("badge hidden at 0", mm is not None and not mm.badge.shown)
+fire("CHAT_MSG_WHISPER", "crusader please", "Ann Toast")
+check("toast on new buyer", toast is not None and toast.shown and "Crusader Weapon" in (toast.what.text or "") and "Ann Toast" in (toast.who.text or ""),
+      toast and (toast.shown, toast.what.text))
+fire("CHAT_MSG_WHISPER", "agi boots?", "Ben Badge")
+fire("CHAT_MSG_WHISPER", "+2 healing on gloves pls", "Cy Cant")
+check("badge counts buyers", mm.badge.shown and mm.badge.text.text == "2", (EP._test.buyers["cy cant"] and EP._test.buyers["cy cant"].cant, mm.badge.text.text))
+check("no toast for an enchant you don't have", toast.key == "ben badge", toast.key)
+fire("CHAT_MSG_WHISPER", "still need crusader", "Ann Toast")
+check("toast once per buyer", toast.key == "ben badge", toast.key)
+advance(7); T.runTimers()
+check("toast hides after 6 s", not toast.shown)
+slash("compact")
+bar = G.EnchantProCompact
+check("compact folds", bar is not None and bar.shown and not panel.shown and "2 buyers · 0 in range" in (bar.text.text or ""),
+      bar and (bar.shown, panel.shown, bar.text.text))
+slash("compact")
+check("compact unfolds", not bar.shown and panel.shown)
+slash("minimap")
+check("/ep minimap hides the button", not mm.shown)
+slash("minimap")
+check("/ep minimap shows it again", mm.shown)
+clear_buyers(); T.runTimers(); T.tells = lua.table()
+
+# --- the code stays in small files and adds no globals beyond its own names
+import re
+new_globals = [k for k in lua.eval("function() local t = {} for k in pairs(_G) do if not T.baseGlobals[k] then t[#t + 1] = tostring(k) end end return t end")().values()
+               if not re.match(r"^(EnchantPro|SLASH_|BINDING_)", k)]
+check("no stray globals", not new_globals, new_globals)
+sizes = {f: len((addon / f).read_text(encoding="utf-8").splitlines()) for f in FILES}
+check("files stay small", all(n < 700 for n in sizes.values()), sizes)
+bad_art = [f for f in FILES if re.search(r'"Interface\\[A-Za-z]', (addon / f).read_text(encoding="utf-8"))]
+check("art paths keep their backslashes", not bad_art, bad_art)
+check("minimap button default angle", G.EnchantProDB.ui.minimapAngle == 200, G.EnchantProDB.ui.minimapAngle)
+check("compact bar default place", G.EnchantProCompact.point is not None and G.EnchantProCompact.point[5] == -80, G.EnchantProCompact.point and G.EnchantProCompact.point[5])
+sibling = addon.parent / "PortalPro" / "UI" / "Kit.lua"
+if sibling.exists():
+    check("kit copies identical", (addon / "UI" / "Kit.lua").read_bytes() == sibling.read_bytes())
+else:
+    print("SKIP kit copies identical (no PortalPro next to this addon)")
+
+# --- the widget kit (UI/Kit.lua)
+Kit = T.ns.Kit
+ltype = G.type
+def ltab(*xs): return lua.table(*xs)
+w = Kit.window("KitTestWin", "Test", r"Interface\Icons\Trade_Engraving", 300, 200, lua.table())
+check("kit window builds", all(ltype(x) == "table" for x in (w.portrait, w.close, w.content, w.titleText)) if w else False)
+T.badTemplates = tbl({"ButtonFrameTemplate": True, "PortraitFrameTemplate": True})
+w2 = Kit.window("KitTestWin2", "Test", r"Interface\Icons\Trade_Engraving", 300, 200, lua.table())
+T.badTemplates = None
+check("kit window falls back", w2 is not None and w2.template == "BackdropTemplate"
+      and all(ltype(x) == "table" for x in (w2.portrait, w2.close, w2.content, w2.titleText)), w2 and w2.template)
+tabs = Kit.tabs(w, ltab("A", "B", "C"), None)
+tabs.Select(tabs, 2)
+check("kit tabs select", tabs.current == 2 and not tabs.pages[1].shown and tabs.pages[2].shown and not tabs.pages[3].shown)
+bars = Kit.bars(w, 3)
+bars.Set(bars, ltab(ltab(10, 0), ltab(5, 5), ltab(0, 0)))
+check("kit bars proportional", [bars["items"][i].frac for i in (1, 2, 3)] == [1, 1, 0], [bars["items"][i].frac for i in (1, 2, 3)])
+pb = Kit.progress(w)
+pb.Set(pb, 1.5); hi = pb.frac
+pb.Set(pb, -1); lo = pb.frac
+check("kit progress clamps", hi == 1 and lo == 0, (hi, lo))
+check("kit classHex", Kit.classHex("MAGE") == "3fc7eb" and Kit.classHex("ROGUE") == "fff569"
+      and Kit.classHex(None) == "ffffff" and Kit.classHex("NOPE") == "ffffff", Kit.classHex("ROGUE"))
+st = Kit.steps(w, ltab("Asked", "Mats", "Item"))
+st.Set(st, 1, 2)
+check("kit steps", st.done == 1 and st.current == 2)
+T.noCloseButton = True
+w3 = Kit.window("KitTestWin3", "Test", r"Interface\Icons\Trade_Engraving", 300, 200, lua.table())
+T.noCloseButton = None
+check("kit window without a close button gets one", ltype(w3.close) == "table", ltype(w3.close))
+
+# --- tips only: no fee unless an enchant has its own
+slash("fee 0")
+nsx = T.ns
+R = EP._test.REC()
+bracer, crus = R[13945], R[20034]
+G.EnchantProDB.fees[20034] = 5000
+bob = tbl({"name": "Bob"})
+rep1 = nsx.replyText(bob, bracer)
+check("tips: reply says free, tips welcome", "+7 Sta Bracer: free with your mats (5 Dream Dust - trade them first), tips welcome" in rep1, rep1)
+rep2 = nsx.replyText(bob, crus)
+check("tips: an enchant's own fee is asked for", rep2.startswith("Crusader Weapon: 50s with your mats"), rep2)
+ad = nsx.adText()
+check("tips: ad", ad == "WTS Enchants: +7 Sta Bracer / Crusader Weapon. Your mats, tips welcome - or full price with my mats. Whisper me!", ad)
+ask = nsx.askText(bob)
+check("tips: ask", "Your mats, tips welcome - or full price with mine." in ask, ask)
+check("tips: thanks without gold", nsx.thanksText(bob, "+7 Sta Bracer", 0, 0, 0, 0) == "Thank you Bob! +7 Sta Bracer done - enjoy!", nsx.thanksText(bob, "+7 Sta Bracer", 0, 0, 0, 0))
+th = nsx.thanksText(bob, "+7 Sta Bracer", 1000, 1000, 0, 0)
+check("tips: thanks for a tip", th == "Thank you Bob! +7 Sta Bracer done - received 10s, much appreciated.", th)
+nsx.refresh()
+check("tips: info line", "Fee: tips only" in (panel.info.text or ""), panel.info.text)
+fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Tia")
+T.npc = "Tia"
+set_trade(money=0, items={1: (11176, 5)}, target={"link": "item:bracer", "name": "Bracers"})
+fire("TRADE_SHOW")
+st = nsx.dockState()
+check("tips: nothing owed with their mats", st.owed == 0 and st.flags[5], st.owed)
+check("tips: dock says tips welcome", "tips welcome" in (G.EnchantProDock.payText.text or ""), G.EnchantProDock.payText.text)
+T.trade.money = 1000
+fire("TRADE_MONEY_CHANGED")
+check("tips: dock shows the tip", "Tip: 10s" in (G.EnchantProDock.payText.text or ""), G.EnchantProDock.payText.text)
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", 13945)
+advance(5)
+n_acc = len(called("AcceptTrade"))
+EP.accept()
+check("tips: accept without asking for gold", len(called("AcceptTrade")) == n_acc + 1, prints()[-1])
+fire("TRADE_ACCEPT_UPDATE", 1, 1)
+fire("UI_INFO_MESSAGE", 0, "Trade complete.")
+fire("TRADE_CLOSED")
+T.runTimers()
+e = G.EnchantProDB.ledger[len(G.EnchantProDB.ledger)]
+check("tips: ledger counts it all as tip", e.k == "sale" and e.p == 0 and e.g == 1000 and e.tip == 1000, (e.k, e.p, e.g, e.tip))
+
+# --- 0.2.0's 20s default turns into tips only, once; a fee you chose stays
+lua4 = runtime("EnchantProDB = { fee = 2000, fees = { [20034] = 5000 } }")
+G4 = lua4.globals()
+G4.T.fire("ADDON_LOADED", "EnchantPro"); G4.T.fire("PLAYER_LOGIN")
+check("old 20s default -> tips only, own fees kept", G4.EnchantProDB.fee == 0 and G4.EnchantProDB.fees[20034] == 5000, G4.EnchantProDB.fee)
+check("old default: says so", any("tips only" in p for p in G4.T.prints.values()))
+lua5 = runtime("EnchantProDB = { fee = 3000 }")
+G5 = lua5.globals()
+G5.T.fire("ADDON_LOADED", "EnchantPro")
+check("a fee you chose stays", G5.EnchantProDB.fee == 3000, G5.EnchantProDB.fee)
+lua6 = runtime("EnchantProDB = { fee = 2000, tipsDefault = true }")
+G6 = lua6.globals()
+G6.T.fire("ADDON_LOADED", "EnchantPro")
+check("20s set again after the change stays", G6.EnchantProDB.fee == 2000, G6.EnchantProDB.fee)
+
+# --- the group: buyers are invited (you see where they are), and let go after the enchant
+lua7 = runtime()
+G7 = lua7.globals()
+T7, EP7 = G7.T, G7.EnchantPro
+def called7(name): return [list(c.values()) for c in T7.called(name).values()]
+def fire7(*a): T7.fire(*a)
+def party7(*names): T7.party = lua7.table(*names); fire7("GROUP_ROSTER_UPDATE")
+rg7 = lua7.eval("rawget")
+def tells7(): return [t.text for t in T7.tells.values()]
+eq7 = lua7.table(); eq7["item:bracer"] = "INVTYPE_WRIST"; T7.equip = eq7
+fire7("ADDON_LOADED", "EnchantPro"); fire7("PLAYER_LOGIN"); fire7("TRADE_SKILL_SHOW"); T7.runTimers()
+fire7("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Gia Rook")
+T7.runTimers()
+check("invite: a buyer who whispers is invited", called7("InviteUnit") == [["InviteUnit", "Gia Rook"]], called7("InviteUnit"))
+check("invite: the reply says so", any("Group invite sent" in (t or "") for t in tells7()), tells7())
+fire7("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Gia Rook")
+check("invite: not twice in a row", len(called7("InviteUnit")) == 1, called7("InviteUnit"))
+fire7("CHAT_MSG_CHANNEL", "LF " + FIERY + " pls", "Al Fire", "", "2. Trade", "", "", 2, 2, "Trade")
+check("invite: not for an enchant you don't have", len(called7("InviteUnit")) == 1, called7("InviteUnit"))
+
+# declines: a public ask in the next 5 minutes isn't invited again, a whisper is
+fire7("CHAT_MSG_CHANNEL", "LF enchanter crusader", "Bo Nay", "", "2. Trade", "", "", 2, 2, "Trade")
+check("invite: someone asking in public chat", called7("InviteUnit")[-1] == ["InviteUnit", "Bo Nay"], called7("InviteUnit"))
+fire7("CHAT_MSG_SYSTEM", "Bo Nay declines your group invitation.")
+T7.time = T7.time + 60
+n = len(called7("InviteUnit"))
+fire7("CHAT_MSG_CHANNEL", "LF enchanter crusader", "Bo Nay", "", "2. Trade", "", "", 2, 2, "Trade")
+check("invite: declined, not again from public chat", len(called7("InviteUnit")) == n, called7("InviteUnit"))
+fire7("CHAT_MSG_WHISPER", "crusader pls", "Bo Nay")
+check("invite: declined, but a whisper asks again", len(called7("InviteUnit")) == n + 1, called7("InviteUnit"))
+
+# joined: in the group, where they are, trade from the group unit
+party7("Gia Rook")
+gia = EP7._test.buyers["gia rook"]
+check("invite: joined", gia.inGroup == True, gia.inGroup)
+mp = lua7.table(); mp["party1"] = 1411; T7.maps = mp
+T7.tick()
+G7.EnchantProDB.shown = True
+G7.EnchantPro.togglePanel(True)
+T7.ns.refresh()
+pnl7 = G7.EnchantProPanel
+gia_row = [T7.ns.rows[i] for i in range(1, 7) if rg7(T7.ns.rows[i], "buyer") is not None and rg7(T7.ns.rows[i], "buyer").key == "gia rook"]
+check("invite: row says in group, and where", gia_row and "in group" in (gia_row[0].right.text or "") and "Durotar" in (gia_row[0].sub.text or ""),
+      gia_row and (gia_row[0].right.text, gia_row[0].sub.text))
+T7.near["party1"] = True
+T7.tick()
+check("invite: trade opens with the group member in range", called7("InitiateTrade") == [["InitiateTrade", "party1"]], called7("InitiateTrade"))
+
+# the enchant done: let go 15 s later, not before
+T7.npc = "Gia Rook"
+tr = lua7.table(); tr.money = 0
+items = lua7.table(); items[1] = lua7.table(11176, 5); tr["items"] = items
+tg = lua7.table(); tg.link = "item:bracer"; tg.name = "Bracers"; tr.target = tg
+T7.trade = tr; G7.TradeFrame.shown = True
+fire7("TRADE_SHOW")
+fire7("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", 13945)
+T7.time = T7.time + 5
+EP7.accept()
+fire7("TRADE_ACCEPT_UPDATE", 1, 1)
+fire7("UI_INFO_MESSAGE", 0, "Trade complete.")
+fire7("TRADE_CLOSED")
+G7.TradeFrame.shown = False
+T7.runTimers()
+T7.tick()
+check("kick: not straight after the enchant", called7("UninviteUnit") == [], called7("UninviteUnit"))
+T7.time = T7.time + 16
+T7.tick()
+check("kick: 15 s after the enchant", called7("UninviteUnit") == [["UninviteUnit", "Gia Rook"]], called7("UninviteUnit"))
+
+# a friend already in your group buys an enchant: no invite, never kicked
+party7("Pal Friend")
+n = len(called7("InviteUnit"))
+fire7("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Pal Friend")
+check("friend in the group: not invited", len(called7("InviteUnit")) == n, called7("InviteUnit"))
+pal = EP7._test.buyers["pal friend"]
+pal.state, pal.doneAt = "done", T7.time
+EP7._test.letGo(pal)
+T7.time = T7.time + 20
+T7.tick()
+check("friend in the group: never kicked", called7("UninviteUnit") == [["UninviteUnit", "Gia Rook"]], called7("UninviteUnit"))
+
+# a full group: the buyer waits, and is invited once a spot frees
+party7("A One", "B Two", "C Three", "D Four")
+n = len(called7("InviteUnit"))
+fire7("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Wai Ting")
+check("full group: waits", len(called7("InviteUnit")) == n and EP7._test.buyers["wai ting"].queued == True)
+party7("A One")
+T7.tick()
+check("full group: invited when a spot frees", called7("InviteUnit")[-1] == ["InviteUnit", "Wai Ting"], called7("InviteUnit")[-1:])
+
+# right-click removes a buyer you invited, and lets them go
+party7("A One", "Wai Ting")
+T7.ns.refresh()
+wrow = [T7.ns.rows[i] for i in range(1, 7) if rg7(T7.ns.rows[i], "buyer") is not None and rg7(T7.ns.rows[i], "buyer").key == "wai ting"]
+wrow[0].scripts.OnClick(wrow[0], "RightButton")
+check("right-click: removed and let go", EP7._test.buyers["wai ting"] is None and called7("UninviteUnit")[-1] == ["UninviteUnit", "Wai Ting"], called7("UninviteUnit")[-1:])
+
+# the switches
+party7()
+G7.SlashCmdList.ENCHANTPRO("invite")
+check("/ep invite turns inviting off", G7.EnchantProDB.invite == False)
+n = len(called7("InviteUnit"))
+fire7("CHAT_MSG_WHISPER", "+7 stam bracer pls", "No Inv")
+check("invite off: nobody invited", len(called7("InviteUnit")) == n)
+T7.ns.refresh()
+nrow = [T7.ns.rows[i] for i in range(1, 7) if rg7(T7.ns.rows[i], "buyer") is not None and rg7(T7.ns.rows[i], "buyer").key == "no inv"]
+nrow[0].scripts.OnClick(nrow[0], "LeftButton")
+check("click on a buyer far away invites them", called7("InviteUnit")[-1] == ["InviteUnit", "No Inv"], called7("InviteUnit")[-1:])
+G7.SlashCmdList.ENCHANTPRO("kick")
+check("/ep kick turns letting go off", G7.EnchantProDB.autoKick == False)
+tg_keys = [T7.ns.toggles[i].key for i in range(1, 7)]
+check("invite and kick toggles on the Buyers tab", "invite" in tg_keys and "autoKick" in tg_keys, tg_keys)
+
+# --- saved settings from 0.2.0 (separate windows) load cleanly
+lua3 = runtime("EnchantProDB = { point = { 'CENTER', 'CENTER', -300, 0 }, shown = true, frames = { ledger = { point = { 'CENTER', 'CENTER', 10, 10 }, w = 460, h = 430 }, messages = { w = 520, h = 420 }, enchants = { w = 560, h = 400 }, panel = { w = 320, h = 290 } } }")
+G3 = lua3.globals()
+G3.T.fire("ADDON_LOADED", "EnchantPro"); G3.T.fire("PLAYER_LOGIN")
+check("old window saves load", G3.EnchantPro.started == True and G3.EnchantProPanel is not None and G3.EnchantProPanel.tabs is not None)
 
 # --- not an enchanter: off, until the profession shows up
 lua2 = runtime()
