@@ -392,6 +392,16 @@ check("fee edit saves for that enchant", G.EnchantProDB.fees[row.rec.id] == 3500
 slash("messages")
 mf = G.EnchantProMessages
 check("messages tab: 4 editors", shown_pages() == ["messages"] and len(list(mf.eds.values())) == 4)
+
+_anch = lua.eval("function(o, r) local ps = o and rawget(o, 'points') or {} for _, p in ipairs(ps) do if rawequal(p[2], r) then return true end end return false end")
+def anchored_to(obj, rel): return bool(_anch(obj, rel))
+check("messages tab: each tokens line sits under its preview, so a wrapped preview pushes it down",
+      all(anchored_to(mf.eds[i].tk, mf.eds[i].pv) for i in range(1, 5)))
+check("messages tab: each editor starts under the one before",
+      all(anchored_to(mf.eds[i].label, mf.eds[i - 1].tk) for i in range(2, 5)))
+fh = G.rawget(ef, "feeHint")
+check("enchants tab: the fee hint ends inside the window", fh is not None and anchored_to(fh, ef) and fh.point[1] == "RIGHT", fh and fh.point)
+check("enchants tab: a long mats list stays on its own row (one line)", all(ef.rows[i].mats.wordWrap is False for i in range(1, 41)))
 slash("ledger")
 lf = G.EnchantProLedger
 check("ledger shows entries", any("Nx Thearabian" in (lf.rows[i].text or "") for i in (1, 2, 3, 4)), [lf.rows[i].text for i in (1, 2, 3)])

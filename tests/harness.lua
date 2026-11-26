@@ -23,12 +23,18 @@ function Frame:Show() local was = self.shown; self.shown = true; if not was and 
 function Frame:Hide() self.shown = false end
 function Frame:IsShown() return self.shown end
 function Frame:SetText(t) self.text = t end
+function Frame:SetWordWrap(v) self.wordWrap = v end
 function Frame:GetText() return self.text end
 function Frame:RegisterEvent(e) self.events[e] = true end
 function Frame:RegisterUnitEvent(e) self.events[e] = true end
 function Frame:GetName() return self.name end
-function Frame:SetPoint(...) self.point = { ... } end
-function Frame:ClearAllPoints() self.point = nil end
+function Frame:SetPoint(...)
+  self.point = { ... }
+  local ps = rawget(self, "points") or {}
+  ps[#ps + 1] = self.point
+  rawset(self, "points", ps)
+end
+function Frame:ClearAllPoints() self.point = nil; rawset(self, "points", nil) end
 function Frame:GetPoint() return "CENTER", nil, "CENTER", 0, 0 end
 function CreateFrame(kind, name, parent, template)
   -- T.badTemplates[name] = true: that template is missing on this client, as CreateFrame errors then

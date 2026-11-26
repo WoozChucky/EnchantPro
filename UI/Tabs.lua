@@ -188,29 +188,32 @@ local msgFrame
 
 local function setChecked(cb, v) if cb.SetChecked then cb:SetChecked(v and true or false) end end
 
-local function addEditor(parent, y, def)
+-- each part hangs from the one above, so a preview or tokens line that wraps pushes the rest down.
+-- above: the editor before this one (nil for the first)
+local function addEditor(parent, above, def)
   local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  label:SetPoint("TOPLEFT", 4, y)
+  if above then label:SetPoint("TOPLEFT", above.tk, "BOTTOMLEFT", -2, -12)
+  else label:SetPoint("TOPLEFT", 4, -4) end
   label:SetText(def.label)
   local reset = button(parent, 70, 20, "Default")
-  reset:SetPoint("TOPRIGHT", -4, y + 3)
   local eb = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
   eb:SetHeight(20)
-  eb:SetPoint("TOPLEFT", 12, y - 18)
+  eb:SetPoint("TOPLEFT", label, "TOPLEFT", 8, -18)
+  reset:SetPoint("BOTTOMRIGHT", eb, "TOPRIGHT", 4, 1)
   eb:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
   eb:SetAutoFocus(false)
   eb:SetMaxLetters(255)
   local pv = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  pv:SetPoint("TOPLEFT", 6, y - 42)
+  pv:SetPoint("TOPLEFT", label, "TOPLEFT", 2, -42)
   pv:SetPoint("RIGHT", parent, "RIGHT", -6, 0)
   pv:SetJustifyH("LEFT")
   local tk = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  tk:SetPoint("TOPLEFT", 6, y - 58)
+  tk:SetPoint("TOPLEFT", pv, "BOTTOMLEFT", 0, -3)
   tk:SetPoint("RIGHT", parent, "RIGHT", -6, 0)
   tk:SetJustifyH("LEFT")
   tk:SetText(def.tokens)
 
-  local ed = { eb = eb, pv = pv }
+  local ed = { eb = eb, pv = pv, tk = tk, label = label }
   function ed.update()
     local raw = eb:GetText()
     local text = def.preview(type(raw) == "string" and raw or "")
@@ -250,24 +253,24 @@ local function buildMessages(mf)
   hint:SetPoint("BOTTOMRIGHT", -4, 0)
   hint:SetText("Enter saves - Escape undoes")
   local B = { name = "Bob", full = "Bob" }
-  mf.eds = {
-    addEditor(mf, -4, { label = "Trade ad", default = AD_DEFAULT, tokens = AD_TOKENS, get = stored("ad"), set = store("ad"),
-      preview = function(t) return adText(t ~= "" and t or AD_DEFAULT) end }),
-    addEditor(mf, -88, { label = "Reply (they named an enchant)", default = REPLY_DEFAULT, tokens = REPLY_TOKENS,
+  local eds = {}
+  mf.eds = eds
+  eds[1] = addEditor(mf, nil, { label = "Trade ad", default = AD_DEFAULT, tokens = AD_TOKENS, get = stored("ad"), set = store("ad"),
+      preview = function(t) return adText(t ~= "" and t or AD_DEFAULT) end })
+  eds[2] = addEditor(mf, eds[1], { label = "Reply (they named an enchant)", default = REPLY_DEFAULT, tokens = REPLY_TOKENS,
       get = stored("replyText"), set = store("replyText"),
-      preview = function(t) return replyText(B, sampleRec(), t ~= "" and t or REPLY_DEFAULT) end }),
-    addEditor(mf, -172, { label = "Reply (no enchant named yet)", default = ASK_DEFAULT, tokens = ASK_TOKENS,
+      preview = function(t) return replyText(B, sampleRec(), t ~= "" and t or REPLY_DEFAULT) end })
+  eds[3] = addEditor(mf, eds[2], { label = "Reply (no enchant named yet)", default = ASK_DEFAULT, tokens = ASK_TOKENS,
       get = stored("askText"), set = store("askText"),
-      preview = function(t) return askText(B, t ~= "" and t or ASK_DEFAULT) end }),
-    addEditor(mf, -256, { label = "Thank-you", default = THANKS_DEFAULT,
+      preview = function(t) return askText(B, t ~= "" and t or ASK_DEFAULT) end })
+  eds[4] = addEditor(mf, eds[3], { label = "Thank-you", default = THANKS_DEFAULT,
       tokens = THANKS_TOKENS .. "\n|cff808080A trade that falls short always says how much is missing instead.|r",
       get = stored("thanksText"), set = store("thanksText"),
-      preview = function(t) return thanksText(B, sampleRec().label, 3000, 1000, 2000, 2000, t ~= "" and t or THANKS_DEFAULT) end }),
-  }
-  local function check(x, y, text, key)
+      preview = function(t) return thanksText(B, sampleRec().label, 3000, 1000, 2000, 2000, t ~= "" and t or THANKS_DEFAULT) end })
+  local function check(x, text, key)   -- on the thank-you label's line
     local cb = CreateFrame("CheckButton", nil, mf, "UICheckButtonTemplate")
     cb:SetSize(22, 22)
-    cb:SetPoint("TOPLEFT", x, y)
+    cb:SetPoint("TOPLEFT", eds[4].label, "TOPLEFT", x, 4)
     local fs = mf:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     fs:SetPoint("LEFT", cb, "RIGHT", 2, 0)
     fs:SetText(text)
@@ -275,7 +278,7 @@ local function buildMessages(mf)
     cb.key = key
     return cb
   end
-  mf.checks = { check(100, -252, "after every enchant", "thanks"), check(240, -252, "in /say, not a whisper", "thanksSay") }
+  mf.checks = { check(96, "after every enchant", "thanks"), check(236, "in /say, not a whisper", "thanksSay") }
   function mf.onLayout() for _, ed in ipairs(mf.eds) do ed.update() end end
   mf:SetScript("OnShow", function(self)
     for _, ed in ipairs(self.eds) do ed.load() end
@@ -340,6 +343,9 @@ local function buildEnchants(ef)
   end)
   local feeHint = ef:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   feeHint:SetPoint("LEFT", ef.fee, "RIGHT", 10, 0)
+  feeHint:SetPoint("RIGHT", ef, "RIGHT", -4, 0)   -- wraps inside the window
+  feeHint:SetJustifyH("LEFT")
+  ef.feeHint = feeHint
   feeHint:SetText("0: no fee, tips only. Counts for every enchant without its own fee. Blank full price: not offered.")
 
   local heads = { { "Ad", 16 }, { "Enchant", 42 }, { "Fee", 212 }, { "Full", 290 }, { "Mats (in your bags)", 366 } }
@@ -375,6 +381,7 @@ local function buildEnchants(ef)
     row.mats:SetPoint("LEFT", 356, 0)
     row.mats:SetPoint("RIGHT", 0, 0)
     row.mats:SetJustifyH("LEFT")
+    row.mats:SetWordWrap(false)   -- one line, cut short; the row's tooltip has the whole list
     -- the box keeps which enchant it was loaded for: a scroll while it has focus can't save to another
     local function onFocus(self) self.recId = row.rec and row.rec.id end
     row.fee:SetScript("OnEditFocusGained", onFocus)
