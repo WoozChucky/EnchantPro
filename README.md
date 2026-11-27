@@ -29,6 +29,8 @@ One buyer is one order, even with several enchants: each one they name is added 
 
 Hover a buyer's line to see what they wrote (their last 5 lines, where and when) and which enchant each line was read as - handy when the addon picked up the wrong one.
 
+Shift-right-click a line to **block** that character: they're taken off and never listed or answered again. `/ep block` lists who you blocked, `/ep block <name>` blocks by name, `/ep unblock <name>` undoes it.
+
 An order stays until it's done, you right-click it away, or the buyer has been quiet for 2 hours. The queue is saved, so a `/reload`, a disconnect or a restart keeps it; each character has its own.
 
 ## Prices

@@ -79,22 +79,6 @@ local function sourceText(b)
   return (string.match(w, "^(.-)%s+%-%s+") or w)
 end
 
--- the row's tooltip: what they typed (last 5 lines, oldest first) and what each was read as
-local function saidTip(b)
-  if type(b.said) ~= "table" or #b.said == 0 then return nil end
-  local lines = { "|cffffd100" .. (b.name or "?") .. " wrote:|r" }
-  for _, m in ipairs(b.said) do
-    local secs = math.max(0, time() - (m.when or time()))
-    local ago = secs < 60 and "now" or secs < 3600 and (math.floor(secs / 60) .. "m") or (math.floor(secs / 3600) .. "h")
-    local w = string.match(m.where or "", "^(.-)%s+%-%s+") or m.where or ""
-    lines[#lines + 1] = "|cff808080[" .. w .. ", " .. ago .. "]|r " .. tostring(m.text or "")
-      .. (m.got and ("  |cff40ff40-> " .. m.got .. "|r")
-        or m.miss and ("  |cffff4040-> " .. m.miss .. " (not one you know)|r")
-        or "  |cff808080-> no enchant named|r")
-  end
-  return table.concat(lines, "\n")
-end
-
 -- the Buyers tab -----------------------------------------------------------------------------
 
 local function buildBuyers(page)
@@ -134,7 +118,7 @@ local function buildBuyers(page)
 
   local head = page:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   head:SetPoint("TOPLEFT", 2, -106)
-  head:SetText("BUYERS  |cff808080click: trade / invite + reply - right-click: remove|r")
+  head:SetText("BUYERS  |cff808080click: trade / invite + reply - right-click: remove (shift: block)|r")
 
   for i = 1, PANEL_MAX_ROWS do
     local r = Kit.row(page, ROW_H)
@@ -143,7 +127,9 @@ local function buildBuyers(page)
     r:SetScript("OnClick", function(self, mouse)
       local b = self.buyer
       if not b then return end
-      if mouse == "RightButton" then
+      if mouse == "RightButton" and IsShiftKeyDown() then
+        ns.block(b.name)
+      elseif mouse == "RightButton" then
         if b.inGroup then ns.kick(b) end   -- someone you invited leaves the group too (with Kick on)
         buyers[b.key] = nil
       elseif b.unit and b.near then
@@ -159,8 +145,8 @@ local function buildBuyers(page)
       ns.refresh()
     end)
     r:SetScript("OnEnter", function(self)
-      local tip = self.buyer and saidTip(self.buyer)
-      if not tip then return end
+      if not self.buyer then return end
+      local tip = Kit.saidTip(self.buyer)
       GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
       GameTooltip:SetText(tip, 1, 1, 1, 1, true)
       GameTooltip:Show()

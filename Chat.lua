@@ -29,7 +29,8 @@ local function has(lower, w) return string.find(lower, wordPattern(w)) ~= nil en
 local function analyze(lower)
   local s = " " .. lower .. " "
   for _, p in ipairs(PHRASES) do s = string.gsub(s, p[1], " " .. p[2] .. " ") end
-  local a = { set = {}, nums = {}, slots = {}, hasNum = false, anySlot = false, effect = false }
+  local a = { set = {}, nums = {}, slots = {}, hasNum = false, anySlot = false, effect = false, slotWords = 0 }
+  local seen = {}
   for w in string.gmatch(s, "%a+") do
     local c = canon(w)
     a.set[c] = true
@@ -37,6 +38,7 @@ local function analyze(lower)
     local sw = SLOT_WORD[w]
     if sw then
       a.anySlot = true
+      if not seen[w] then seen[w] = true; a.slotWords = a.slotWords + 1 end
       for k, v in pairs(sw) do if v > (a.slots[k] or 0) then a.slots[k] = v end end
     end
   end
@@ -87,7 +89,8 @@ local SELL_CUES = { "wts", "selling", "sell", "lfw", "lf work", "your mats", "ur
   "whisper me", "w me", "/w", "pst", "msg me", "can do", "services", "service", "cheap", "free" }
 -- only enchanters write these: they win over "lf" and "?" ("LF customers, can do [Crusader], your mats")
 local SELLER_CUES = { "customer", "customers", "tips appreciated", "tip appreciated", "your mats", "ur mats",
-  "my enchants", "all enchants", "for sale", "selling", "offering", "services", "lf work", "lfw", "wts" }
+  "my enchants", "all enchants", "for sale", "selling", "offering", "services", "lf work", "lfw", "wts",
+  "pm for", "much more" }
 
 -- Enchant links in a line as the game sends it: |Henchant:20034|h[Enchant Weapon - Crusader]|h, and spell links
 -- ("[Enchanting: Enchant ...]") alike. A profession link ([Enchanting]) is how enchanters advertise.
@@ -149,7 +152,8 @@ local function channelIntent(lower, links)
   -- an enchant named by a word only enchants use ("crusader", "fiery") counts without "enchant" or a slot
   local distinct = false
   for _, k in ipairs(r and r.keys or {}) do if DISTINCT[k] then distinct = true end end
-  if links.trade then return false, "seller" end                    -- [Enchanting]: an enchanter's own link
+  -- [Enchanting]: an enchanter's own link, or typed to look like one
+  if links.trade or string.find(lower, "[enchanting]", 1, true) then return false, "seller" end
   if not svc and not distinct and not (a.effect and a.anySlot) then return false end
   if has(lower, "disenchant") or has(lower, "de") then return false end
   local wtb = has(lower, "wtb")
@@ -162,6 +166,7 @@ local function channelIntent(lower, links)
   local buy = wtb or string.find(lower, "?", 1, true) ~= nil
   for _, w in ipairs(BUY_CUES) do if buy then break end; buy = has(lower, w) end
   if buy then return true, r, a, unknown end
+  if a.slotWords >= 3 then return false, "seller" end              -- bracer, gloves, boots... with no ask: a price list
   for _, w in ipairs(SELL_CUES) do
     if string.find(lower, w, 1, true) then return false, "seller" end
   end

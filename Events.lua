@@ -266,6 +266,7 @@ local HELP = {
   "/ep listen | reply | invite | kick | thanks | whisper | sound - turn one on / off",
   "/ep ledger - the ledger window.  /ep stats - today / 7 days / all time in chat.  /ep ledger reset",
   "/ep test <line> - would this chat line count as a buyer, and for which enchant?",
+  "/ep block - who you blocked.  /ep block <name> - never list them (or shift-right-click their line).  /ep unblock <name>",
   "/ep compact - fold the window to one line (again: back) - /ep minimap - hide or show the minimap button",
   "Keys: Game Menu > Key Bindings > EnchantPro (Post ad, Cast enchant, Accept trade).",
 }
@@ -361,6 +362,10 @@ SlashCmdList.ENCHANTPRO = function(msg)
         p[1], net(T) < 0 and "-" or "", money(math.abs(net(T))), money(T.income), money(T.tips),
         money(T.matsCost), T.sales, T.theirMats, money(T.short)))
     end
+  elseif cmd == "block" then
+    if rest == "" then ns.listBlocked() else ns.block(rest) end
+  elseif cmd == "unblock" then
+    ns.unblock(rest)
   elseif cmd == "test" then
     local raw = dropRecipeItems(rest)
     local links = readLinks(raw)

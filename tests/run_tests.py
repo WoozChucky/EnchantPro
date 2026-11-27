@@ -110,6 +110,11 @@ for line, want, label in [
     ("need fiery weapon enchant", True, None),
     ("ding! enchanting 225", False, None),
     ("+2 healing on gloves anyone", True, None),
+    # an enchanter's price list in plain text (no links), seen in game as a buyer
+    ('> [Enchanting] < [Crusader]  [25str 2H] ] [16 SP bracer] - [15 str gloves ] - [8% boots] - [100 healing wep] - [5 agi cloak] [20 HolyD gloves] [Neck enchants] [6int 5 sp OFF-HAND]  [ALL new weapon proc enchants]. PM for much more!', False, None),
+    ("crusader, 25 str 2h, 16 sp bracer, 15 str gloves, 5 agi cloak", False, None),
+    ("[Enchanting] crusader and +7 stam bracer", False, None),
+    ("need someone to enchant my bracer, gloves and boots", True, None),
 ]:
     ok, lab = chat(line)
     check(f"chat '{line}' -> {want}, {label}", bool(ok) == want and (not want or lab == label), (ok, lab))
@@ -979,6 +984,45 @@ T12.fire("CHAT_MSG_WHISPER", "LF " + FIERY, "Can Not")
 T12.time = T12.time + 11 * 60
 T12.tick()
 check("a numbered buyer you then can't serve leaves after 10 minutes", qb12["can not"] is None, qb12["can not"] and (qb12["can not"].cant, qb12["can not"].n))
+
+# --- block: shift-right-click a buyer and they're never listed again
+lua13, G13, T13 = fresh()
+T13.fire("ADDON_LOADED", "EnchantPro"); T13.fire("PLAYER_LOGIN"); T13.fire("TRADE_SKILL_SHOW"); T13.runTimers()
+qb13 = T13.ns.buyers
+G13.EnchantPro.togglePanel(True)
+T13.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Dark Dreams")
+T13.ns.refresh()
+rd = row_of(T13.ns, "dark dreams", G13.rawget)
+T13.shift = True
+if rd is not None: rd.scripts.OnClick(rd, "RightButton")
+T13.shift = False
+bl13 = G13.rawget(G13.EnchantProDB, "blocked")
+check("block: shift-right-click takes them off and remembers them", qb13["dark dreams"] is None and bl13 is not None and bl13["dark dreams"] is not None,
+      (qb13["dark dreams"] is None, bl13))
+n13 = (len(T13.calls), len(T13.tells))
+T13.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Dark Dreams")
+T13.fire("CHAT_MSG_CHANNEL", "LF enchanter for +7 stam bracer", "Dark Dreams", "", "2. Trade", "", "", 2, 2, "Trade")
+check("block: they're never listed again", qb13["dark dreams"] is None)
+check("block: and get no answer", len(T13.tells) == n13[1] and not any(T13.calls[i][1] == "SendChatMessage" for i in range(n13[0] + 1, len(T13.calls) + 1)), len(T13.tells) - n13[1])
+G13.SlashCmdList.ENCHANTPRO("unblock dark dreams")
+T13.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Dark Dreams")
+check("block: /ep unblock lets them back", qb13["dark dreams"] is not None)
+G13.SlashCmdList.ENCHANTPRO("block Some Body")
+T13.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Some Body")
+check("block: /ep block Name blocks by name", qb13["some body"] is None and G13.EnchantProDB.blocked["some body"] is not None)
+G13.SlashCmdList.ENCHANTPRO("block")   # the list: must not error
+T13.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Plain Click")
+T13.ns.refresh()
+rp = row_of(T13.ns, "plain click", G13.rawget)
+if rp is not None: rp.scripts.OnClick(rp, "RightButton")
+check("block: a plain right-click only removes", qb13["plain click"] is None and G13.EnchantProDB.blocked["plain click"] is None)
+T13.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Plain Click")
+check("block: ... so they can come back", qb13["plain click"] is not None)
+T13.ns.refresh()
+rp = row_of(T13.ns, "plain click", G13.rawget)
+G13.GameTooltip.text = None
+if rp is not None and rp.scripts.OnEnter: rp.scripts.OnEnter(rp)
+check("block: the tooltip says how", "Shift-right-click" in (G13.rawget(G13.GameTooltip, "text") or ""), G13.rawget(G13.GameTooltip, "text"))
 
 # --- saved settings from 0.2.0 (separate windows) load cleanly
 lua3 = runtime("EnchantProDB = { point = { 'CENTER', 'CENTER', -300, 0 }, shown = true, frames = { ledger = { point = { 'CENTER', 'CENTER', 10, 10 }, w = 460, h = 430 }, messages = { w = 520, h = 420 }, enchants = { w = 560, h = 400 }, panel = { w = 320, h = 290 } } }")
