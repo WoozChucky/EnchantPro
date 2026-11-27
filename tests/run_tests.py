@@ -1032,6 +1032,21 @@ ls = G13.rawget(qb13["les ser"], "said") if qb13["les ser"] is not None else Non
 check("hover: an enchant you don't have shows as one you can't do", ls is not None and ls[1].miss is not None and qb13["les ser"].cant, ls and ls[1].miss)
 check("block: the tooltip says how", "Shift-right-click" in (G13.rawget(G13.GameTooltip, "text") or ""), G13.rawget(G13.GameTooltip, "text"))
 
+# --- EnchantPro.claims(name): PortalPro asks whose a trade is
+lua14, G14, T14 = fresh()
+T14.fire("ADDON_LOADED", "EnchantPro"); T14.fire("PLAYER_LOGIN"); T14.fire("TRADE_SKILL_SHOW"); T14.runTimers()
+E14 = G14.EnchantPro
+T14.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Ench Buyer")
+check("claims: an enchant buyer's trade is EnchantPro's", E14.claims("Ench Buyer") is True and E14.claims("Ench Buyer-Forever") is True)
+check("claims: a stranger's isn't", E14.claims("Port Guy") is False and E14.claims(None) is False)
+T14.npc = "Walk In"
+tr = lua14.table(); tr.money = 500; tr["items"] = lua14.table()
+tg = lua14.table(); tg.link = "item:bracer"; tg.name = "item:bracer"; tr.target = tg
+T14.trade = tr; G14.TradeFrame.shown = True
+T14.fire("TRADE_SHOW")
+T14.fire("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", 13945)
+check("claims: a trade with an enchant cast in it is EnchantPro's", E14.claims("Walk In") is True)
+
 # --- saved settings from 0.2.0 (separate windows) load cleanly
 lua3 = runtime("EnchantProDB = { point = { 'CENTER', 'CENTER', -300, 0 }, shown = true, frames = { ledger = { point = { 'CENTER', 'CENTER', 10, 10 }, w = 460, h = 430 }, messages = { w = 520, h = 420 }, enchants = { w = 560, h = 400 }, panel = { w = 320, h = 290 } } }")
 G3 = lua3.globals()

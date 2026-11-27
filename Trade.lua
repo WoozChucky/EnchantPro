@@ -231,6 +231,19 @@ local function updateOverlay()
   if ns.updateDock then ns.updateDock() end
 end
 
+-- Is a trade with this name EnchantPro's? An enchant buyer of ours, or an enchant cast in that trade.
+-- PortalPro asks before it takes someone in the group for a portal buyer.
+function EP.claims(name)
+  if type(name) ~= "string" then return false end
+  local key = string.lower(shortName(name) or "")
+  if key == "" then return false end
+  if buyers[key] then return true end
+  for _, t in ipairs({ EP.trade or false, EP.lastTrade or false }) do
+    if t and t.castRec and type(t.name) == "string" and string.lower(shortName(t.name) or "") == key then return true end
+  end
+  return false
+end
+
 local function tradeDone()
   local t = EP.trade or EP.lastTrade
   if not t or t.counted then return end
