@@ -161,6 +161,7 @@ f:SetScript("OnEvent", function(_, ev, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, 
   if ev == "ADDON_LOADED" then
     if a1 == ADDON then initDB() end
   elseif ev == "PLAYER_LOGIN" then
+    ns.splitLedger()
     ns.myName = fullName("player") or ""
     local e = isEnchanter()
     if e then EP.start(); return end

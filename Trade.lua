@@ -46,6 +46,24 @@ local function tradeBuyer()
 end
 
 -- what is in the buyer's side of the trade: gold, mats (slots 1-6), the item to enchant (slot 7)
+-- Whose trade is it? An item to enchant, mats or a cast make it an enchant trade; so does a buyer who asked
+-- EnchantPro in chat. Gold alone from anyone else is PortalPro's when it claims them (a portal buyer, or
+-- someone in the group of a mage selling portals).
+local function askedUs(name)
+  local b = type(name) == "string" and buyers[string.lower(shortName(name) or "")]
+  return b and b.src ~= "trade" and true or false
+end
+local function enchantSigns(t)
+  return t.target ~= nil or (t.items and next(t.items) ~= nil) or t.castRec ~= nil
+end
+local function portalTrade(t)
+  if not t or not t.name or enchantSigns(t) or askedUs(t.name) then return false end
+  local P = _G.PortalPro
+  if type(P) ~= "table" or type(P.claims) ~= "function" then return false end
+  local ok, mine = pcall(P.claims, t.name)
+  return ok and mine == true
+end
+
 local function readTrade()
   local t = EP.trade
   if not t then return end
@@ -69,8 +87,9 @@ local function readTrade()
   else
     t.target = nil
   end
-  -- anyone who opens trade with an item to enchant, or hands gold or mats over, is a buyer
-  if t.name and (t.target or t.money > 0 or next(t.items)) then
+  -- anyone who opens trade with an item to enchant, or hands gold or mats over, is a buyer - unless it's
+  -- gold alone for PortalPro
+  if t.name and (t.target or t.money > 0 or next(t.items)) and not portalTrade(t) then
     local b = buyerFor(t.name)
     ns.enqueue(b)
     b.at = now()   -- a trade is word from them
@@ -203,7 +222,7 @@ end
 -- current: the first of Mats..Paid not done (Asked is only told, never waited for); done: how many are done.
 function ns.dockState()
   local t = EP.trade
-  if not t then return nil end
+  if not t or portalTrade(t) then return nil end
   local b = tradeBuyer()
   local r = EP.plan()
   local s = { buyer = b, rec = r, got = t.money or 0, mats = {}, flags = {} }
@@ -237,9 +256,10 @@ function EP.claims(name)
   if type(name) ~= "string" then return false end
   local key = string.lower(shortName(name) or "")
   if key == "" then return false end
-  if buyers[key] then return true end
+  if askedUs(name) then return true end
   for _, t in ipairs({ EP.trade or false, EP.lastTrade or false }) do
-    if t and t.castRec and type(t.name) == "string" and string.lower(shortName(t.name) or "") == key then return true end
+    local tn = t and type(t.name) == "string" and string.lower(shortName(t.name) or "")
+    if tn == key and (enchantSigns(t) or (t.final and enchantSigns(t.final))) then return true end
   end
   return false
 end
@@ -252,6 +272,7 @@ local function tradeDone()
   local got = snap.money or 0
   local r = t.castRec and ns.REC[t.castRec]
   local b = t.name and buyers[string.lower(shortName(t.name) or "")]
+  if not r and portalTrade(t) then return end   -- gold for a portal: PortalPro's
   if not b and not r then return end
   if not b then b = buyerFor(t.name); b.new = nil end
   b.at = now()
@@ -306,6 +327,7 @@ function EP.accept()
   if not (tf and tf:IsShown()) then return end
   local t = EP.trade
   local armed = EP.acceptArmed and now() - EP.acceptArmed < 3
+  if t and portalTrade(t) then pcall(AcceptTrade); return end   -- PortalPro's to check
   if t and not armed then
     local b = tradeBuyer()
     if t.target and not t.castRec and not t.target.ench then

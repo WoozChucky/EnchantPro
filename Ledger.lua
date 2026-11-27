@@ -38,6 +38,43 @@ local function ledgerAdd(e)
   if EP.ledgerRefresh then EP.ledgerRefresh() end
 end
 
+-- Once: until 0.5.3 both addons logged some trades. A gold-only "pay" here that PortalPro logged as a trade
+-- (same name, within 15 s) was a portal payment: taken out, and out of the totals.
+-- an enchant sale to n in the 30 minutes from t: gold handed over at t was paying for it
+local function saleAfter(L, n, t)
+  for _, o in ipairs(L) do
+    if o.k == "sale" and o.n == n and (o.t or 0) >= (t or 0) and (o.t or 0) - (t or 0) <= 1800 then return true end
+  end
+  return false
+end
+
+local function splitLedger()
+  if ns.DB.ledgerSplit then return end
+  ns.DB.ledgerSplit = true
+  local other = type(PortalProDB) == "table" and type(PortalProDB.ledger) == "table" and PortalProDB.ledger
+  if not other then return end
+  local L, keep, gone = ns.DB.ledger, {}, 0
+  for _, e in ipairs(L) do
+    local drop = false
+    if e.k == "pay" and (e.g or 0) > 0 and (e.it == nil or e.it == "") and not saleAfter(L, e.n, e.t) then
+      for _, o in ipairs(other) do
+        if o.k == "trade" and o.n == e.n and math.abs((o.t or 0) - (e.t or 0)) <= 15 then drop = true; break end
+      end
+    end
+    if drop then
+      ns.DB.totals.income = ns.DB.totals.income - (e.g or 0)
+      gone = gone + 1
+    else
+      keep[#keep + 1] = e
+    end
+  end
+  if gone > 0 then
+    for i = #L, 1, -1 do L[i] = nil end
+    for i, e in ipairs(keep) do L[i] = e end
+    ns.say(gone .. " portal payment(s) PortalPro had logged too were taken out of this ledger.")
+  end
+end
+
 local function ledgerSum(since)
   if not since then return ns.DB.totals end
   local T = newTotals()
@@ -107,6 +144,7 @@ ns.bestSellers = bestSellers
 ns.owing = owing
 ns.newTotals = newTotals
 ns.ledgerAdd = ledgerAdd
+ns.splitLedger = splitLedger
 ns.ledgerSum = ledgerSum
 ns.net = net
 ns.dayStart = dayStart

@@ -1047,6 +1047,74 @@ T14.fire("TRADE_SHOW")
 T14.fire("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", 13945)
 check("claims: a trade with an enchant cast in it is EnchantPro's", E14.claims("Walk In") is True)
 
+# --- a portal trade (PortalPro's) isn't EnchantPro's: no buyer, no ledger entry, no dock
+lua15, G15, T15 = fresh()
+T15.fire("ADDON_LOADED", "EnchantPro"); T15.fire("PLAYER_LOGIN"); T15.fire("TRADE_SKILL_SHOW"); T15.runTimers()
+E15, qb15 = G15.EnchantPro, T15.ns.buyers
+pclaimed = lua15.eval("{}")
+G15.PortalPro = lua15.eval("function(c) return { claims = function(name) return c[name] == true end } end")(pclaimed)
+def trade15(name, money=0, item=None, mats=None, spell=None):
+    T15.npc = name
+    tr = lua15.table(); tr.money = money
+    it = lua15.table()
+    for slot, (iid, q) in (mats or {}).items(): it[slot] = lua15.table(iid, q)
+    tr["items"] = it
+    if item:
+        tg = lua15.table(); tg.link = item; tg.name = item; tr.target = tg
+    T15.trade = tr; G15.TradeFrame.shown = True
+    T15.fire("TRADE_SHOW"); T15.fire("TRADE_MONEY_CHANGED")
+    if spell: T15.fire("UNIT_SPELLCAST_SUCCEEDED", "player", "guid", spell)
+    dock = T15.ns.dockState()
+    claim = E15.claims(name)
+    T15.time = T15.time + 5
+    T15.fire("TRADE_ACCEPT_UPDATE", 1, 1)
+    T15.fire("UI_INFO_MESSAGE", 0, "Trade complete.")
+    T15.fire("TRADE_CLOSED"); G15.TradeFrame.shown = False
+    T15.runTimers()
+    return dock, claim
+pclaimed["Port Guy"] = True
+n15 = len(G15.EnchantProDB.ledger)
+dock15, claim15 = trade15("Port Guy", money=5000)
+check("portal trade: not in EnchantPro's ledger", len(G15.EnchantProDB.ledger) == n15, len(G15.EnchantProDB.ledger) - n15)
+check("portal trade: not an enchant buyer", qb15["port guy"] is None)
+check("portal trade: no enchant dock", dock15 is None)
+check("portal trade: EnchantPro doesn't claim it", claim15 is False)
+dock15b, claim15b = trade15("Port Guy", item="item:bracer", spell=13945)
+check("PortalPro's buyer bringing an item to enchant: EnchantPro's", claim15b is True and len(G15.EnchantProDB.ledger) == n15 + 1)
+T15.fire("CHAT_MSG_WHISPER", "+7 stam bracer pls", "Ench Pre")
+pclaimed["Ench Pre"] = True
+n15 = len(G15.EnchantProDB.ledger)
+_, claim15c = trade15("Ench Pre", money=3000)
+check("an enchant buyer's gold-only prepayment stays EnchantPro's", claim15c is True and len(G15.EnchantProDB.ledger) == n15 + 1 and qb15["ench pre"].paid == 3000)
+n15 = len(G15.EnchantProDB.ledger)
+trade15("Some Walkin", money=1000)
+check("gold from a stranger PortalPro doesn't claim: still EnchantPro's", len(G15.EnchantProDB.ledger) == n15 + 1)
+
+# --- one-time cleanup: gold-only "pay" entries that were really portal trades (both ledgers had them)
+pre16 = """
+EnchantProDB = { ledger = {
+  { t = 1000, k = "pay", n = "Port Guy", g = 5000 },
+  { t = 1003, k = "sale", n = "Awar Lock", en = "x", mode = "mats", p = 0, g = 500, tip = 500 },
+  { t = 2000, k = "pay", n = "Ench Pre", g = 3000 },
+  { t = 3000, k = "pay", n = "Mat Guy", g = 0, it = "5x Dust" },
+  { t = 2300, k = "sale", n = "Ench Pre", en = "x", mode = "mats", p = 0, g = 0, pre = 3000, tip = 3000 },
+}, totals = { income = 8500, tips = 500, sales = 1, theirMats = 1, myMats = 0, matsCost = 0, short = 0, unpaid = 0 } }
+PortalProDB = { ledger = {
+  { t = 1002, k = "trade", n = "Port Guy", g = 5000, tip = 0, p = 5000 },
+  { t = 1004, k = "trade", n = "Awar Lock", g = 500, tip = 0, p = 5000 },
+  { t = 3001, k = "trade", n = "Mat Guy", g = 0, tip = 0, p = 5000 },
+  { t = 2001, k = "trade", n = "Ench Pre", g = 3000, tip = 0, p = 5000 },
+} }
+"""
+lua16, G16, T16 = fresh(pre16)
+T16.fire("ADDON_LOADED", "EnchantPro"); T16.fire("PLAYER_LOGIN")
+L16 = G16.EnchantProDB.ledger
+kinds16 = [(L16[i].k, L16[i].n) for i in range(1, len(L16) + 1)]
+check("cleanup: a portal payment that also landed here is taken out", ("pay", "Port Guy") not in kinds16, kinds16)
+check("cleanup: everything else stays (a prepayment the enchant followed too)", kinds16 == [("sale", "Awar Lock"), ("pay", "Ench Pre"), ("pay", "Mat Guy"), ("sale", "Ench Pre")], kinds16)
+check("cleanup: totals follow", G16.EnchantProDB.totals.income == 3500, G16.EnchantProDB.totals.income)
+check("cleanup: runs once", G16.EnchantProDB.ledgerSplit is True)
+
 # --- saved settings from 0.2.0 (separate windows) load cleanly
 lua3 = runtime("EnchantProDB = { point = { 'CENTER', 'CENTER', -300, 0 }, shown = true, frames = { ledger = { point = { 'CENTER', 'CENTER', 10, 10 }, w = 460, h = 430 }, messages = { w = 520, h = 420 }, enchants = { w = 560, h = 400 }, panel = { w = 320, h = 290 } } }")
 G3 = lua3.globals()
