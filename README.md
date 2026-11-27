@@ -27,6 +27,8 @@ Every buyer you can serve gets a number when they first ask (`#1`, `#2`…), and
 
 One buyer is one order, even with several enchants: each one they name is added to the order (a second enchant for the same slot replaces the first, as a correction). The row lists them all and ticks each one off once cast; the dock picks the one that fits the item in the trade. The order is done when every enchant is.
 
+Hover a buyer's line to see what they wrote (their last 5 lines, where and when) and which enchant each line was read as - handy when the addon picked up the wrong one.
+
 An order stays until it's done, you right-click it away, or the buyer has been quiet for 2 hours. The queue is saved, so a `/reload`, a disconnect or a restart keeps it; each character has its own.
 
 ## Prices

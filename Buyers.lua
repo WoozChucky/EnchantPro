@@ -61,6 +61,7 @@ local function request(sender, text, src, where, guid)
   local name = shortName(sender)
   if not name or string.lower(name) == string.lower(ns.myName) then return end
   local key = string.lower(name)
+  local typed = text   -- as they wrote it, for the row's tooltip
   if src ~= "whisper" and EP.sellers[key] and now() - EP.sellers[key] < 3600 then return end
   text = dropRecipeItems(text)
   local links = readLinks(text)
@@ -101,6 +102,11 @@ local function request(sender, text, src, where, guid)
     b.slot = firstSlot(a)
   end
   b.at, b.src, b.where = t, src, where
+  -- what they typed and what it was read as, so a wrong match can be seen on hover: the last 5 lines
+  b.said = b.said or {}
+  table.insert(b.said, { text = typed, where = where or src, when = time(),
+    got = r and r.label or nil, miss = not r and type(unknown) == "string" and unknown ~= "" and unknown or nil })
+  while #b.said > 5 do table.remove(b.said, 1) end
   ns.enqueue(b)
   if not b.class and type(guid) == "string" and not isSecret(guid) and guid ~= "" then
     local ok, _, cls = pcall(GetPlayerInfoByGUID, guid)

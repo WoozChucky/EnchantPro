@@ -795,6 +795,28 @@ T8.time = T8.time + 11 * 60
 T8.tick()
 check("queue: still there after 11 minutes", qb["ann a"] is not None and qb["cy c"] is not None)
 wait_before = T8.time - qb["ann a"].since
+# hover a row: what they typed, and what the addon made of it
+G8.EnchantPro.togglePanel(True); T8.ns.refresh()
+ra = row_of(T8.ns, "ann a", G8.rawget)
+G8.GameTooltip.text = None
+if ra is not None and ra.scripts.OnEnter: ra.scripts.OnEnter(ra)
+tip8 = G8.rawget(G8.GameTooltip, "text") or ""
+lab8 = T8.ns.REC[qb["ann a"].rec].label
+check("hover: the row's tooltip shows what they typed", "+7 stam bracer pls" in tip8, tip8)
+check("hover: ... and the enchant it was read as", lab8 in tip8 and "whisper" in tip8, tip8)
+T8.fire("CHAT_MSG_CHANNEL", "LF " + FIERY + " pls", "Al Fire", "", "2. Trade", "", "", 2, 2, "Trade")   # gone after 11 min; asks again
+T8.ns.refresh()
+rf = row_of(T8.ns, "al fire", G8.rawget)
+G8.GameTooltip.text = None
+if rf is not None and rf.scripts.OnEnter: rf.scripts.OnEnter(rf)
+tipf = G8.rawget(G8.GameTooltip, "text") or ""
+check("hover: a line you can't serve shows too, with where it was said", "pls" in tipf and "Trade" in tipf, tipf)
+for i in range(1, 8):
+    T8.fire("CHAT_MSG_WHISPER", "LF " + FIERY + " pls " + str(i), "Al Fire")
+sd = G8.rawget(qb["al fire"], "said") or []
+check("hover: keeps the last 5 lines", len(sd) == 5 and sd[1].text.endswith("pls 3") and sd[5].text.endswith("pls 7"),
+      [sd[i].text for i in range(1, len(sd) + 1)] if len(sd) else sd)
+check("hover: lines don't give a number", qb["al fire"].n is None)
 
 # a client restart: GetTime starts over, the wall clock moved on 60 s
 T8.fire("PLAYER_LOGOUT")
@@ -811,6 +833,8 @@ check("restore: the queue is back after a restart", ok and (qb9["ann a"].n, qb9[
 check("restore: waiting time carries on", ok and abs((T9.time - qb9["ann a"].since) - (wait_before + 60)) <= 1,
       ok and (T9.time - qb9["ann a"].since, wait_before + 60))
 check("restore: the save is cleared once loaded", G9.EnchantProDB.queues["Mage"] is None)
+said9 = qb9["ann a"] and G9.rawget(qb9["ann a"], "said")
+check("restore: what they typed is kept too", said9 is not None and any(said9[i].text == "+7 stam bracer pls" for i in range(1, len(said9) + 1)))
 T9.fire("CHAT_MSG_WHISPER", "crusader pls", "Dee D")
 check("restore: numbers carry on", qb9["dee d"].n == 4, qb9["dee d"].n)
 T9.npc = "Tra Der"

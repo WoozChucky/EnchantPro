@@ -79,6 +79,22 @@ local function sourceText(b)
   return (string.match(w, "^(.-)%s+%-%s+") or w)
 end
 
+-- the row's tooltip: what they typed (last 5 lines, oldest first) and what each was read as
+local function saidTip(b)
+  if type(b.said) ~= "table" or #b.said == 0 then return nil end
+  local lines = { "|cffffd100" .. (b.name or "?") .. " wrote:|r" }
+  for _, m in ipairs(b.said) do
+    local secs = math.max(0, time() - (m.when or time()))
+    local ago = secs < 60 and "now" or secs < 3600 and (math.floor(secs / 60) .. "m") or (math.floor(secs / 3600) .. "h")
+    local w = string.match(m.where or "", "^(.-)%s+%-%s+") or m.where or ""
+    lines[#lines + 1] = "|cff808080[" .. w .. ", " .. ago .. "]|r " .. tostring(m.text or "")
+      .. (m.got and ("  |cff40ff40-> " .. m.got .. "|r")
+        or m.miss and ("  |cffff4040-> " .. m.miss .. " (not one you know)|r")
+        or "  |cff808080-> no enchant named|r")
+  end
+  return table.concat(lines, "\n")
+end
+
 -- the Buyers tab -----------------------------------------------------------------------------
 
 local function buildBuyers(page)
@@ -142,6 +158,14 @@ local function buildBuyers(page)
       end
       ns.refresh()
     end)
+    r:SetScript("OnEnter", function(self)
+      local tip = self.buyer and saidTip(self.buyer)
+      if not tip then return end
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetText(tip, 1, 1, 1, 1, true)
+      GameTooltip:Show()
+    end)
+    r:SetScript("OnLeave", function() GameTooltip:Hide() end)
     rows[i] = r
   end
   ns.scroll = Kit.scroller(page, function() ns.refresh() end)
