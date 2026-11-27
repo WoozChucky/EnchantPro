@@ -105,7 +105,7 @@ local function request(sender, text, src, where, guid)
   b.at, b.src, b.where = t, src, where
   -- what they typed and what it was read as, so a wrong match can be seen on hover: the last 5 lines
   ns.Kit.noteSaid(b, typed, where or src, r and r.label or nil,
-    not r and type(unknown) == "string" and unknown ~= "" and unknown or nil)
+    not r and (type(unknown) == "string" and unknown ~= "" and unknown or (a and a.effect and "that enchant")) or nil)
   ns.enqueue(b)
   if not b.class and type(guid) == "string" and not isSecret(guid) and guid ~= "" then
     local ok, _, cls = pcall(GetPlayerInfoByGUID, guid)

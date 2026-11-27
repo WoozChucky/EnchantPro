@@ -115,6 +115,11 @@ for line, want, label in [
     ("crusader, 25 str 2h, 16 sp bracer, 15 str gloves, 5 agi cloak", False, None),
     ("[Enchanting] crusader and +7 stam bracer", False, None),
     ("need someone to enchant my bracer, gloves and boots", True, None),
+    # a tier or a +amount that contradicts an enchant rules it out (seen: "greater agility (+7)" read as Minor Agility)
+    ("LF LESSER STAMINA BRACERS enchant", True, None),
+    ("LF stamina bracer enchant (+5)", True, None),
+    ("LF GREATER STAMINA BRACERS enchant (+7) OR (+5)", True, "+7 Sta Bracer"),
+    ("LF minor stamina bracer", True, "+1 Sta Bracer"),
 ]:
     ok, lab = chat(line)
     check(f"chat '{line}' -> {want}, {label}", bool(ok) == want and (not want or lab == label), (ok, lab))
@@ -1022,6 +1027,9 @@ T13.ns.refresh()
 rp = row_of(T13.ns, "plain click", G13.rawget)
 G13.GameTooltip.text = None
 if rp is not None and rp.scripts.OnEnter: rp.scripts.OnEnter(rp)
+T13.fire("CHAT_MSG_CHANNEL", "LF LESSER STAMINA BRACERS enchant", "Les Ser", "", "2. Trade", "", "", 2, 2, "Trade")
+ls = G13.rawget(qb13["les ser"], "said") if qb13["les ser"] is not None else None
+check("hover: an enchant you don't have shows as one you can't do", ls is not None and ls[1].miss is not None and qb13["les ser"].cant, ls and ls[1].miss)
 check("block: the tooltip says how", "Shift-right-click" in (G13.rawget(G13.GameTooltip, "text") or ""), G13.rawget(G13.GameTooltip, "text"))
 
 # --- saved settings from 0.2.0 (separate windows) load cleanly

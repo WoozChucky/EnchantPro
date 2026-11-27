@@ -6,6 +6,7 @@ local PHRASES = ns.PHRASES
 local EFFECT_WORDS = ns.EFFECT_WORDS
 local DISTINCT = ns.DISTINCT
 local canon = ns.canon
+local TIER_RANK = ns.TIER_RANK
 local parseRecipe = ns.parseRecipe
 
 -- ---------------------------------------------------------------------------------------
@@ -47,6 +48,9 @@ local function analyze(lower)
     n = tonumber(n)
     if n and n >= 1 and n <= 40 then a.nums[n], a.hasNum = true, true end
   end
+  -- what the line pins down: a tier ("greater") and amounts written with a plus ("+7")
+  for t in pairs(TIER_RANK) do if a.set[t] then a.tiers = a.tiers or {}; a.tiers[t] = true end end
+  for n in string.gmatch(s, "%+%s*(%d+)") do a.plus = a.plus or {}; a.plus[tonumber(n)] = true end
   return a
 end
 
@@ -54,6 +58,9 @@ local function score(r, a)
   local hit = 0
   for _, k in ipairs(r.keys) do if a.set[k] then hit = hit + 1 end end
   if hit == 0 then return nil end
+  -- a tier or a +amount the line names that this enchant doesn't have: not the one they want
+  if a.tiers and not a.tiers[r.tier or ""] then return nil end
+  if a.plus and r.amount and not a.plus[r.amount] then return nil end
   local sc = hit * 4
   if a.anySlot then
     local s = a.slots[r.slot]
