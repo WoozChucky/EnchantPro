@@ -55,7 +55,7 @@ local EQUIP = {
   INVTYPE_WEAPON = { weapon = true }, INVTYPE_WEAPONMAINHAND = { weapon = true }, INVTYPE_WEAPONOFFHAND = { weapon = true },
 }
 
-local TIER_RANK = { minor = 1, lesser = 2, greater = 4, superior = 5, major = 6 }
+local TIER_RANK = { inferior = 0, minor = 1, lesser = 2, greater = 4, superior = 5, major = 6 }
 
 -- multi-word ways of writing one thing, applied before the line is cut into words
 local PHRASES = {

@@ -1115,6 +1115,29 @@ check("cleanup: everything else stays (a prepayment the enchant followed too)", 
 check("cleanup: totals follow", G16.EnchantProDB.totals.income == 3500, G16.EnchantProDB.totals.income)
 check("cleanup: runs once", G16.EnchantProDB.ledgerSplit is True)
 
+# --- unsure which rank they want: the best one you know (seen: "stam on bracers" read as Inferior Stamina)
+pre17 = """
+EnchantProDB = { chars = { Mage = { recipes = {
+  [7418] = { name = "Enchant Bracer - Inferior Stamina" },
+  [7457] = { name = "Enchant Bracer - Minor Stamina", amount = 1 },
+  [13501] = { name = "Enchant Bracer - Lesser Stamina", amount = 3 },
+  [13648] = { name = "Enchant Bracer - Stamina", amount = 5 },
+  [13644] = { name = "Enchant Boots - Lesser Stamina", amount = 3 },
+} } } }
+"""
+lua17, G17, T17 = fresh(pre17)
+T17.fire("ADDON_LOADED", "EnchantPro"); T17.fire("PLAYER_LOGIN")
+ci17, clean17 = G17.EnchantPro._test.channelIntent, G17.EnchantPro._test.clean
+def chat17(line):
+    r = ci17(clean17(line))
+    return r[1].label if isinstance(r, tuple) and r[0] and r[1] else None
+check("rank: 'stam on bracers' -> the best stamina bracer", chat17("LF enchanter Recovery, agi on neck, stam on bracers") == "+5 Sta Bracer",
+      chat17("LF enchanter Recovery, agi on neck, stam on bracers"))
+check("rank: Inferior is the lowest", chat17("LF minor stamina bracer") == "+1 Sta Bracer" and chat17("LF inferior stamina bracer") == "Inferior Stamina Bracer",
+      (chat17("LF minor stamina bracer"), chat17("LF inferior stamina bracer")))
+check("rank: the best first in the list", [G17.EnchantPro._test.knownList()[i].name for i in range(1, 6)][4] == "Enchant Bracer - Inferior Stamina",
+      [G17.EnchantPro._test.knownList()[i].name for i in range(1, 6)])
+
 # --- saved settings from 0.2.0 (separate windows) load cleanly
 lua3 = runtime("EnchantProDB = { point = { 'CENTER', 'CENTER', -300, 0 }, shown = true, frames = { ledger = { point = { 'CENTER', 'CENTER', 10, 10 }, w = 460, h = 430 }, messages = { w = 520, h = 420 }, enchants = { w = 560, h = 400 }, panel = { w = 320, h = 290 } } }")
 G3 = lua3.globals()

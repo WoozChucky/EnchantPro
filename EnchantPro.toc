@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: EnchantPro
 ## Notes: Sell enchants: finds buyers in chat, knows your enchants and their mats, opens trade, checks mats and payment, casts the right enchant on the trade item, keeps a ledger. /ep
-## Version: 0.5.3
+## Version: 0.5.4
 ## SavedVariables: EnchantProDB
 ## OptionalDeps: Auctionator
 

@@ -70,7 +70,8 @@ local function score(r, a)
   if r.amount and a.hasNum then sc = sc + (a.nums[r.amount] and 3 or -1) end
   if r.tier and a.set[r.tier] then sc = sc + 2 end
   if ns.DB.adList[r.id] then sc = sc + 0.5 end
-  return sc + r.rank * 0.05   -- unsure which: the better one
+  -- unsure which: the better one - the higher tier, then the bigger +amount
+  return sc + r.rank * 0.05 + (r.amount or 0) * 0.001
 end
 
 -- the enchant you know that fits the line best, or nil

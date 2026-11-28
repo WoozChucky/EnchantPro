@@ -73,6 +73,7 @@ local function rebuildKnown()
   table.sort(ns.knownList, function(a, b)
     if a.slot ~= b.slot then return SLOT_ORDER[a.slot] < SLOT_ORDER[b.slot] end
     if a.rank ~= b.rank then return a.rank > b.rank end
+    if (a.amount or 0) ~= (b.amount or 0) then return (a.amount or 0) > (b.amount or 0) end
     return a.name < b.name
   end)
 end
